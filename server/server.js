@@ -86,7 +86,7 @@ function authorized(req) {
 const server = http.createServer((req, res) => {
   if (!authorized(req)) {
     res.writeHead(401, {'WWW-Authenticate': 'Basic realm="Pac-Man World Rally", charset="UTF-8"', 'Content-Type': 'text/plain; charset=utf-8'});
-    res.end('Senha necessaria.');
+    res.end('Password required.');
     return;
   }
   let p = decodeURIComponent(req.url.split('?')[0]);
@@ -233,7 +233,7 @@ const log = (...a) => { if (process.env.PMWR_DEBUG) console.log(new Date().toISO
 function join(c, r, token) {
   log('join', c.name, r.code, token ? 'token ' + token.slice(0, 6) : 'new');
   const seat = token ? [...r.members.values()].find(m => m.token === token && m !== c) : null;
-  if (!seat && r.members.size >= MAX_PLAYERS) { c.ws.send(JSON.stringify({t: 'error', msg: 'A sala está cheia.'})); return; }
+  if (!seat && r.members.size >= MAX_PLAYERS) { c.ws.send(JSON.stringify({t: 'error', msg: 'The room is full.'})); return; }
   leave(c);
   if (seat) {
     clearTimeout(seat.awayTimer);
@@ -261,18 +261,18 @@ function join(c, r, token) {
 const cleanName = (s, def) => (String(s || '').replace(/[^\p{L}\p{N} _.\-!?]/gu, '').trim().slice(0, 20) || def);
 
 function onClient(ws) {
-  const c = {ws, name: 'Jogador', room: null, ip: null};
+  const c = {ws, name: 'Player', room: null, ip: null};
   ws.onmessage = msg => {
     if (typeof msg !== 'string') { route(c, msg); return; }
     let m;
     try { m = JSON.parse(msg); } catch (e) { return; }
     switch (m.t) {
-      case 'hello': c.name = cleanName(m.name, 'Jogador'); break;
+      case 'hello': c.name = cleanName(m.name, 'Player'); break;
       case 'list':
         ws.send(JSON.stringify({t: 'rooms', rooms: [...rooms.values()].filter(r => r.public).map(roomInfo)}));
         break;
       case 'create': {
-        const r = {code: newCode(), name: cleanName(m.name, 'Sala de ' + c.name), public: !!m.public,
+        const r = {code: newCode(), name: cleanName(m.name, c.name + "'s room"), public: !!m.public,
                    members: new Map(), owner: null, playing: false, created: Date.now(),
                    settings: cleanSettings(m.settings), startSeq: 0};
         rooms.set(r.code, r);
@@ -281,7 +281,7 @@ function onClient(ws) {
       }
       case 'join': {
         const r = rooms.get(String(m.code || '').toUpperCase().trim());
-        if (!r) ws.send(JSON.stringify({t: 'error', msg: 'Sala não encontrada. Confira o código.'}));
+        if (!r) ws.send(JSON.stringify({t: 'error', msg: 'Room not found. Check the code.'}));
         else join(c, r, typeof m.token === 'string' ? m.token : null);
         break;
       }

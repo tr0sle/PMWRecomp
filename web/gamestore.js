@@ -13,12 +13,12 @@
       const rq = indexedDB.open(DB, 1);
       rq.onupgradeneeded = () => { rq.result.createObjectStore('files'); rq.result.createObjectStore('meta'); };
       rq.onsuccess = () => res(rq.result);
-      rq.onerror = () => rej(rq.error || new Error('IndexedDB indisponível'));
+      rq.onerror = () => rej(rq.error || new Error('IndexedDB is not available'));
     });
     return dbp;
   }
   const req = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-  const done = tx => new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = tx.onabort = () => rej(tx.error || new Error('erro ao salvar')); });
+  const done = tx => new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = tx.onabort = () => rej(tx.error || new Error('could not save')); });
 
   async function info() {
     try {
@@ -50,7 +50,7 @@
     const tail = await bytes(file, file.size - tailLen, file.size);
     let eocd = -1;
     for (let i = tail.byteLength - 22; i >= 0; i--) if (tail.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-    if (eocd < 0) throw new Error('Esse arquivo não é um .zip válido.');
+    if (eocd < 0) throw new Error('This file is not a valid .zip.');
     let count = tail.getUint16(eocd + 10, true), cdSize = tail.getUint32(eocd + 12, true), cdOff = tail.getUint32(eocd + 16, true);
     if (cdOff === 0xffffffff || count === 0xffff) { /* zip64 */
       const loc = eocd - 20;
@@ -66,7 +66,7 @@
     const dec = new TextDecoder();
     const list = [];
     for (let p = 0, k = 0; k < count && p + 46 <= cd.byteLength; k++) {
-      if (cd.getUint32(p, true) !== 0x02014b50) throw new Error('O .zip está corrompido.');
+      if (cd.getUint32(p, true) !== 0x02014b50) throw new Error('The .zip is damaged.');
       const flags = cd.getUint16(p + 8, true), method = cd.getUint16(p + 10, true);
       let csize = cd.getUint32(p + 20, true), size = cd.getUint32(p + 24, true);
       const nlen = cd.getUint16(p + 28, true), xlen = cd.getUint16(p + 30, true), clen = cd.getUint16(p + 32, true);
@@ -91,11 +91,11 @@
 
   async function extract(file, e) {
     const lh = await bytes(file, e.off, e.off + 30);
-    if (lh.getUint32(0, true) !== 0x04034b50) throw new Error('O .zip está corrompido.');
+    if (lh.getUint32(0, true) !== 0x04034b50) throw new Error('The .zip is damaged.');
     const start = e.off + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
     const raw = file.slice(start, start + e.csize);
     if (e.method === 0) return raw;
-    if (e.method !== 8) throw new Error('O .zip usa uma compressão não suportada. Gere o .zip pelo Windows ("Enviar para > Pasta compactada").');
+    if (e.method !== 8) throw new Error('The .zip uses an unsupported compression method. Create it with Windows ("Send to > Compressed (zipped) folder").');
     const blob = await new Response(raw.stream().pipeThrough(new DecompressionStream('deflate-raw'))).blob();
     if (blob.size !== e.size) throw new Error('Erro ao descompactar ' + e.name + '.');
     return blob;
@@ -108,22 +108,22 @@
 
   // imports a .zip of the installed game; onProgress(fraction, text)
   async function importZip(file, onProgress = () => {}) {
-    onProgress(0, 'Lendo o .zip…');
+    onProgress(0, 'Reading the .zip…');
     const all = await entries(file);
-    if (all.some(e => e.encrypted)) throw new Error('O .zip tem senha. Gere um .zip sem senha.');
+    if (all.some(e => e.encrypted)) throw new Error('The .zip is password-protected. Create one without a password.');
     const exe = all.find(e => /(^|\/)pmr\.exe$/i.test(e.name));
-    if (!exe) throw new Error('Não encontrei o PMR.exe dentro do .zip. Compacte a pasta onde o jogo está instalado.');
+    if (!exe) throw new Error('PMR.exe was not found in the .zip. Zip the folder where the game is installed.');
     const base = exe.name.slice(0, exe.name.length - 'PMR.exe'.length);
     const files = all.filter(e => e.name.startsWith(base) && !/(^|\/)\./.test(e.name.slice(base.length)))
                      .map(e => ({...e, rel: e.name.slice(base.length)}));
     const names = new Set(files.map(f => f.rel.toLowerCase()));
     const missing = REQUIRED.filter(r => !names.has(r));
-    if (missing.length) throw new Error('Faltam arquivos do jogo no .zip: ' + missing.join(', '));
+    if (missing.length) throw new Error('Game files missing from the .zip: ' + missing.join(', '));
 
-    onProgress(0.01, 'Conferindo a versão do jogo…');
+    onProgress(0.01, 'Checking the game version…');
     const exeBlob = await extract(file, exe);
     if (await sha256(exeBlob) !== PMR_SHA256)
-      throw new Error('Esse PMR.exe é de outra versão do jogo. Este port funciona com o Pac-Man World Rally para PC (2006, versão americana).');
+      throw new Error('This PMR.exe is from a different version of the game. This port works with Pac-Man World Rally for PC (2006, US release).');
 
     if (navigator.storage && navigator.storage.persist) { try { await navigator.storage.persist(); } catch (e) {} }
     await clear();
@@ -132,7 +132,7 @@
     let doneBytes = 0;
     const list = [];
     for (const f of files) {
-      onProgress(doneBytes / total, 'Instalando ' + f.rel + '…');
+      onProgress(doneBytes / total, 'Installing ' + f.rel + '…');
       const blob = f === exe ? exeBlob : await extract(file, f);
       const tx = d.transaction('files', 'readwrite');
       tx.objectStore('files').put(blob, f.rel.toLowerCase());
@@ -144,7 +144,7 @@
     const tx = d.transaction('meta', 'readwrite');
     tx.objectStore('meta').put(meta, 'info');
     await done(tx);
-    onProgress(1, 'Pronto!');
+    onProgress(1, 'Done!');
     return meta;
   }
 

@@ -291,7 +291,7 @@ addToLibrary({
       const fin = () => { if (!done) { done = true; st.last = performance.now(); res(); } };
       requestAnimationFrame(fin);
       // keep running (at low rate) when the tab is in the background
-      setTimeout(fin, document.hidden ? 16 : 250); // hidden tabs get no rAF: keep ~60 fps so online peers don't time out (audible tabs aren't throttled)
+      setTimeout(fin, document.hidden ? 16 : 50); // hidden tabs get no rAF: keep ~60 fps so online peers don't time out (audible tabs aren't throttled)
     });
   },
   js_sleep__async: true,

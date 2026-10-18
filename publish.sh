@@ -4,6 +4,6 @@ set -euo pipefail
 cd "$(dirname "$0")"
 ./build.sh
 git add -A
-git commit -m "${1:-Atualização}" || echo "(nada novo para commitar)"
+git commit -m "${1:-Update}" || echo "(nothing new to commit)"
 git push
 deploy/deploy.sh

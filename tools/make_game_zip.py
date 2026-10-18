@@ -7,7 +7,7 @@ works as well (Windows: right-click the folder > Send to > Compressed (zipped) f
 import os, sys, zipfile
 
 src = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else r"C:\Program Files\Pac-Man World Rally")
-out = os.path.abspath(sys.argv[2] if len(sys.argv) > 2 else "pmwr-jogo.zip")
+out = os.path.abspath(sys.argv[2] if len(sys.argv) > 2 else "pmwr-game.zip")
 if not os.path.isfile(os.path.join(src, "PMR.exe")):
     sys.exit("PMR.exe not found in " + src)
 

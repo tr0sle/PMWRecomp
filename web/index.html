@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -81,26 +81,26 @@
 <div id="wrap"><canvas id="canvas" tabindex="0" width="640" height="480"></canvas></div>
 <div id="overlay">
   <div id="install">
-    <h2>Carregue o seu jogo</h2>
-    <div>Este site não tem os arquivos do Pac-Man World Rally: você usa a <b>sua própria cópia</b> do jogo para PC.</div>
+    <h2>Load your game</h2>
+    <div>This site does not include Pac-Man World Rally: you play with <b>your own copy</b> of the PC game.</div>
     <ol>
-      <li>Abra a pasta onde o jogo está instalado (a que tem o <code>PMR.exe</code>).</li>
-      <li>Clique com o botão direito na pasta → <b>Enviar para</b> → <b>Pasta compactada (zipada)</b>.</li>
-      <li>Escolha ou arraste aqui o <b>.zip</b> criado.</li>
+      <li>Open the folder where the game is installed (the one with <code>PMR.exe</code>).</li>
+      <li>Right-click the folder → <b>Send to</b> → <b>Compressed (zipped) folder</b>.</li>
+      <li>Choose or drop the new <b>.zip</b> here.</li>
     </ol>
-    <div id="drop">Arraste o .zip aqui ou <button id="pick" class="secondary">Escolher arquivo .zip</button><input id="zipInput" type="file" accept=".zip,application/zip" hidden></div>
+    <div id="drop">Drop the .zip here or <button id="pick" class="secondary">Choose .zip file</button><input id="zipInput" type="file" accept=".zip,application/zip" hidden></div>
     <div class="bar"><div></div></div>
     <div id="installMsg"></div>
-    <div class="note">Os arquivos ficam guardados só neste navegador (não são enviados para o servidor). Você só precisa fazer isso uma vez.</div>
+    <div class="note">The files are stored only in this browser (they are never uploaded to the server). You only need to do this once.</div>
   </div>
   <div id="menu">
   <h1>Pac-Man World Rally</h1>
-  <div class="btns"><button id="start" disabled>Carregando…</button><button id="online" class="secondary" disabled>Jogar online</button></div>
-  <div class="hint">Teclado: setas para dirigir, Enter/Espaço para confirmar, Esc para voltar. Controles de jogo (gamepad) funcionam se você apertar um botão neles antes de começar.</div>
-  <button id="changeGame" style="display:none">Trocar os arquivos do jogo</button>
+  <div class="btns"><button id="start" disabled>Loading…</button><button id="online" class="secondary" disabled>Play online</button></div>
+  <div class="hint">Keyboard: arrows to drive, Enter/Space to confirm, Esc to go back. Gamepads work if you press a button on them before starting.</div>
+  <button id="changeGame" style="display:none">Change game files</button>
   </div>
 </div>
-<button id="fs" title="Tela cheia">⛶ Tela cheia</button>
+<button id="fs" title="Fullscreen">⛶ Fullscreen</button>
 <div id="status"></div>
 <div id="error"></div>
 <script src="gamestore.js"></script>
@@ -116,8 +116,8 @@ var Module = {
   setStatus(t) { statusEl.textContent = t || ''; },
   print(t) { console.log(t); },
   printErr(t) { const l = window.__log || (window.__log = []); l.push(t); if (l.length > 20000) l.splice(0, 5000); if (!Module.quiet) console.warn(t); },
-  onFatal(msg) { errorEl.style.display = 'block'; errorEl.textContent = 'Erro: ' + msg + '\n(veja o console para detalhes)'; },
-  onExit(code) { Module.setStatus('O jogo terminou (código ' + code + ').'); },
+  onFatal(msg) { errorEl.style.display = 'block'; errorEl.textContent = 'Error: ' + msg + '\n(see the console for details)'; },
+  onExit(code) { Module.setStatus('The game exited (code ' + code + ').'); },
   onMessageBox(text, caption) { errorEl.style.display = 'block'; errorEl.textContent = (caption ? caption + ': ' : '') + text; },
   resizeCanvas() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -190,7 +190,7 @@ function askForGame() {
 }
 
 (async () => {
-  Module.setStatus('Carregando lista de arquivos…');
+  Module.setStatus('Loading file list…');
   const manifest = await (await fetch('manifest.json')).json();
   await loadSaves();
   const ready = new Promise(res => { Module.onRuntimeInitialized = res; });
@@ -204,13 +204,13 @@ function askForGame() {
     Module.manifest = info.files.map(([name, size]) => [name, size, 'idb:']).concat(manifest.files);
     const change = document.getElementById('changeGame');
     change.style.display = '';
-    change.onclick = async () => { if (confirm('Remover os arquivos do jogo deste navegador e carregar outro .zip?')) { await GameStore.clear(); location.reload(); } };
+    change.onclick = async () => { if (confirm('Remove the game files from this browser and load another .zip?')) { await GameStore.clear(); location.reload(); } };
   }
-  Module.setStatus('Carregando código do jogo…');
+  Module.setStatus('Loading game code…');
   await ready;
   Module.setStatus('');
   startBtn.disabled = false;
-  startBtn.textContent = 'Jogar sozinho';
+  startBtn.textContent = 'Play solo';
   onlineBtn.disabled = false;
   startBtn.focus();
   Online.startGame = startGame;

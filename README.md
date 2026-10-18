@@ -1,65 +1,65 @@
-# PMWRecomp — Pac-Man World Rally (PC) no navegador
+# PMWRecomp — Pac-Man World Rally (PC) in the browser
 
-Recompilação estática do `PMR.exe` (Pac-Man World Rally para PC, 2006) para WebAssembly:
-x86 → C → wasm. Uma camada própria emula Windows, OpenGL 1.1 (sobre WebGL2), FMOD (WebAudio),
-DirectInput (teclado e gamepad) e Winsock. A Winsock vira uma rede local virtual por WebSocket,
-o que traz o modo de rede do jogo para a internet, com salas.
+A static recompilation of `PMR.exe` (Pac-Man World Rally for PC, 2006) to WebAssembly:
+x86 → C → wasm. The browser runtime emulates Windows, OpenGL 1.1 (on WebGL2), FMOD (on
+WebAudio), DirectInput (keyboard and gamepad) and Winsock. Winsock becomes a virtual LAN over
+WebSocket, which brings the game's own network mode to the internet with online rooms.
 
-**Este repositório não contém o jogo.** Não há arquivos do jogo, nem código gerado a partir
-do executável, nem decompilação. Para jogar, cada pessoa usa a **própria cópia** do jogo para PC.
+**This repository does not contain the game.** It has no game files, no code generated from the
+executable and no decompilation. To play, each person uses **their own copy** of the PC game.
 
-## Jogar (site publicado)
+## Playing (published site)
 
-1. Abra o site e clique em **Escolher arquivo .zip**.
-2. Envie um .zip da pasta onde o jogo está instalado. No Windows: botão direito na pasta →
-   *Enviar para* → *Pasta compactada*. Também dá para usar `python tools/make_game_zip.py PASTA`.
-   - O site confere a versão do `PMR.exe` (SHA-256 `a017c5ec…3f4c`).
-   - Os arquivos ficam só no navegador (IndexedDB) e nunca são enviados ao servidor.
-3. **Jogar sozinho** ou **Jogar online**:
-   - Salas públicas ou privadas (código de 6 letras ou link de convite), até 4 jogadores.
-   - O dono escolhe o modo (corrida, circuito, 5 modos de batalha), a pista, as CPUs e as opções.
-   - A partida começa sozinha para todos.
+1. Open the site and click **Choose .zip file**.
+2. Upload a .zip of the folder where the game is installed. On Windows: right-click the folder →
+   *Send to* → *Compressed (zipped) folder*, or run `python tools/make_game_zip.py FOLDER`.
+   - The site checks the `PMR.exe` version (SHA-256 `a017c5ec…3f4c`).
+   - The files stay in your browser (IndexedDB) and are never uploaded to the server.
+3. **Play solo** or **Play online**:
+   - Public or private rooms (6-letter code or invite link), up to 4 players.
+   - The room owner picks the mode (race, circuit, 5 battle modes), the track, CPUs and options.
+   - The match starts automatically for everyone.
 
-Use um navegador com JSPI (Chrome ou Edge atuais).
+Requires a browser with JSPI (current Chrome or Edge).
 
-## Compilar
+## Building
 
-Requisitos: Python 3 com `pefile` e `capstone`, [emsdk](https://emscripten.org) (Emscripten 6),
-Node.js 20 ou mais, bash (Git Bash no Windows) e uma cópia instalada do jogo.
+Requirements: Python 3 with `pefile` and `capstone`, [emsdk](https://emscripten.org)
+(Emscripten 6), Node.js 20+, bash (Git Bash on Windows) and an installed copy of the game.
 
 ```bash
-export PMWR_GAME_DIR="/caminho/do/jogo"    # pasta com o PMR.exe
-python tools/codegen.py                     # gera gen/*.c a partir do seu PMR.exe
-./build.sh                                  # compila para dist/
-node server/server.js --game "$PMWR_GAME_DIR"   # http://localhost:8080
+export PMWR_GAME_DIR="/path/to/game"        # folder containing PMR.exe
+python tools/codegen.py                      # generates gen/*.c from your PMR.exe
+./build.sh                                   # builds into dist/
+node server/server.js --game "$PMWR_GAME_DIR"    # http://localhost:8080
 ```
 
-- Com `--game`, o servidor local entrega os arquivos do jogo direto, o que é útil para
-  desenvolver.
-- Sem `--game` (ou com `--no-game`), funciona como o site público e pede o .zip a cada jogador.
-- `http://localhost:8080/test2.html?n=3` abre 2 a 4 jogos lado a lado para testar o online.
+- With `--game`, the local server serves the game files directly, which is handy for development.
+- Without `--game` (or with `--no-game`), it behaves like the public site and asks each player
+  for their .zip.
+- `http://localhost:8080/test2.html?n=3` opens 2 to 4 game instances side by side to test online
+  play.
 
-### Estrutura
+### Layout
 
-| Pasta | Conteúdo |
+| Folder | Contents |
 |---|---|
-| `tools/` | analisador e gerador de código (x86 → C), script do .zip do jogo |
-| `runtime/` | CPU/memória, Win32, OpenGL→WebGL2, FMOD→WebAudio, DirectInput, rede virtual, ponte JS |
-| `web/` | página, salas online (`online.js`), armazenamento do jogo (`gamestore.js`) |
-| `server/` | servidor Node sem dependências: arquivos do site + relay das salas (`/ws`) |
-| `deploy/` | preparação do servidor e publicação |
+| `tools/` | analyzer and code generator (x86 → C), game .zip helper |
+| `runtime/` | CPU/memory, Win32, OpenGL→WebGL2, FMOD→WebAudio, DirectInput, virtual network, JS bridge |
+| `web/` | page, online rooms (`online.js`), in-browser game storage (`gamestore.js`) |
+| `server/` | dependency-free Node server: site files + room relay (`/ws`) |
+| `deploy/` | server setup and publishing scripts |
 
-## Publicar (servidor próprio)
+## Publishing (your own server)
 
-O servidor precisa rodar Node.js continuamente e aceitar WebSocket: uma VPS ou máquina
-virtual Linux. Hospedagem compartilhada comum não serve.
+The server must run Node.js continuously and accept WebSocket connections: a Linux VPS or
+virtual machine. Regular shared hosting will not work.
 
-1. Copie `deploy/config.example.env` para `deploy/config.env` e preencha o IP, o domínio e a
-   chave SSH.
-2. Na primeira vez, rode `deploy/deploy.sh --setup`. Ele instala Node.js, Caddy (HTTPS
-   automático) e o serviço.
-3. Depois de cada mudança, rode `./publish.sh "o que mudou"`. Ele compila, envia ao GitHub e
-   atualiza o site.
+1. Copy `deploy/config.example.env` to `deploy/config.env` and fill in the IP, domain and SSH key.
+2. The first time, run `deploy/deploy.sh --setup`. It installs Node.js, Caddy (automatic HTTPS)
+   and the service.
+3. After each change, run `./publish.sh "what changed"`. It builds, pushes to GitHub and updates
+   the site.
 
-O `pmr.wasm` só pode ser compilado com uma cópia do jogo, por isso a publicação sai desta
-máquina, e não de um CI.
+`pmr.wasm` can only be built with a copy of the game, so publishing runs from the developer's
+machine instead of CI.
