@@ -23,6 +23,8 @@ executable and no decompilation. To play, each person uses **their own copy** of
    - Public or private rooms (6-letter code or invite link), up to 4 players.
    - The room owner picks the mode (race, circuit, 5 battle modes), the track, CPUs and options.
    - The match starts automatically for everyone.
+  
+  YOU CAN DOWNLOAD THE GAME .ZIP HERE: https://www.myabandonware.com/game/pac-man-world-rally-f1i#download
 
 Requires a browser with JSPI (current Chrome or Edge).
 
