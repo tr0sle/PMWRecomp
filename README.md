@@ -1,3 +1,7 @@
+<p align="center"><img src="docs/logo.webp" alt="Pac-Man World Rally Browser Recomp" width="640"></p>
+
+<h3 align="center"><a href="https://pmwr.space">▶ Play now at pmwr.space</a></h3>
+
 # PMWRecomp — Pac-Man World Rally (PC) in the browser
 
 A static recompilation of `PMR.exe` (Pac-Man World Rally for PC, 2006) to WebAssembly:
@@ -10,7 +14,7 @@ executable and no decompilation. To play, each person uses **their own copy** of
 
 ## Playing (published site)
 
-1. Open the site and click **Choose .zip file**.
+1. Open [pmwr.space](https://pmwr.space) and click **Choose .zip file**.
 2. Upload a .zip of the folder where the game is installed. On Windows: right-click the folder →
    *Send to* → *Compressed (zipped) folder*, or run `python tools/make_game_zip.py FOLDER`.
    - The site checks the `PMR.exe` version (SHA-256 `a017c5ec…3f4c`).
