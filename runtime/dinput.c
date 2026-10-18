@@ -4,6 +4,7 @@
 #include "hle.h"
 #include "js.h"
 #include "win32.h"
+#include <emscripten.h>
 
 #define DI_OK 0
 #define DI_NOEFFECT 1
@@ -129,6 +130,7 @@ static const uint8_t PAD_D4[8] = {0x00, 0x00, 0x50, 0x49, 0x44, 0x56, 0x49, 0x44
 
 static int guid_is(uint32_t p, uint32_t d1) { return p && LD32(p) == d1; }
 
+#define MAX_PADS 4
 static int joy_count(void) { return js_gamepad_count(); }
 
 static uint32_t new_device(int type, int pad) {
@@ -208,7 +210,10 @@ static void di_EnumDevices(void) { /* (this, type, cb, ref, flags) */
   if (want_kb && cont) { ST32(inst, 580); fill_devinst(inst, DEV_KEYBOARD, 0); uint32_t a[2] = {inst, ref}; cont = guest_call(cb, 2, a, 0) != 0; }
   if (want_mouse && cont) { ST32(inst, 580); fill_devinst(inst, DEV_MOUSE, 0); uint32_t a[2] = {inst, ref}; cont = guest_call(cb, 2, a, 0) != 0; }
   if (want_joy) {
-    int n = joy_count();
+    /* The game enumerates controllers once, at start-up, but browsers only expose a gamepad
+     * after a button is pressed on it with the page open. So 4 joysticks are always attached;
+     * joystick k reads the k-th connected browser gamepad (neutral while there is none). */
+    int n = joy_count() > MAX_PADS ? joy_count() : MAX_PADS;
     for (int k = 0; k < n && cont; k++) {
       ST32(inst, 580);
       fill_devinst(inst, DEV_JOY, k);
@@ -234,6 +239,25 @@ static const DevObj *dev_objs(Dev *d, int *n) {
   return NULL;
 }
 
+static int jcalls[32];
+static const char *jnames[32] = {"QI", "AddRef", "Release", "GetCaps", "EnumObjects", "GetProp", "SetProp", "Acquire", "Unacquire",
+  "GetState", "GetData", "SetFormat", "SetEvent", "SetCoop", "GetObjInfo", "GetDevInfo", "Panel", "Init", "CreateEffect",
+  "EnumEffects", "GetEffectInfo", "GetFFState", "SendFF", "EnumCreated", "Escape", "Poll", "SendData", "EnumFile", "WriteFile",
+  "BuildMap", "SetMap", "GetImage"};
+#define JC(i) do { uint32_t k_ = LD32(ARG(0) + 4); if (k_ < MAX_DEVS && devs[k_].type == DEV_JOY) jcalls[i]++; } while (0)
+EMSCRIPTEN_KEEPALIVE void di_stats(void) {
+  fprintf(stderr, "DirectInput joystick calls:");
+  for (int i = 0; i < 32; i++) if (jcalls[i]) fprintf(stderr, " %s=%d", jnames[i], jcalls[i]);
+  fprintf(stderr, "\n");
+  for (int k = 0; k < MAX_DEVS; k++) {
+    Dev *d = &devs[k];
+    if (!d->used || d->type != DEV_JOY) continue;
+    fprintf(stderr, "  pad%d acq=%d size=%u map:", d->pad, d->acquired, d->data_size);
+    for (int m = 0; m < d->nmapped; m++) fprintf(stderr, " %c%d@%u", "ABP"[d->map[m].kind], d->map[m].index, d->map[m].ofs);
+    fprintf(stderr, " range=%d..%d dz=%d\n", d->range_min[0], d->range_max[0], d->deadzone[0]);
+  }
+}
+
 static void dev_QueryInterface(void) { ST32(ARG(2), ARG(0)); RET(3, DI_OK); }
 static void dev_AddRef(void) { RET(1, 2); }
 static void dev_Release(void) {
@@ -242,7 +266,7 @@ static void dev_Release(void) {
   RET(1, 0);
 }
 
-static void dev_GetCapabilities(void) {
+static void dev_GetCapabilities(void) { JC(3);
   Dev *d = dev_of(ARG(0));
   uint32_t p = ARG(1), sz = LD32(p);
   memset(GPTR(p + 4), 0, (sz ? sz : 44) - 4);
@@ -259,7 +283,7 @@ static uint32_t obj_type(const DevObj *o, Dev *d, int idx_in_kind) {
   return 0x10u | ((uint32_t)o->index << 8);
 }
 
-static void dev_EnumObjects(void) { /* (this, cb, ref, flags) */
+static void dev_EnumObjects(void) { JC(4); /* (this, cb, ref, flags) */
   Dev *d = dev_of(ARG(0));
   uint32_t cb = ARG(1), ref = ARG(2), flags = ARG(3);
   int n;
@@ -300,7 +324,7 @@ static int prop_axis(Dev *d, uint32_t hdr) {
   return -2;
 }
 
-static void dev_GetProperty(void) { /* (this, prop, hdr) */
+static void dev_GetProperty(void) { JC(5); /* (this, prop, hdr) */
   Dev *d = dev_of(ARG(0));
   uint32_t prop = ARG(1), hdr = ARG(2);
   int ax = prop_axis(d, hdr);
@@ -318,7 +342,7 @@ static void dev_GetProperty(void) { /* (this, prop, hdr) */
   RET(3, DIERR_UNSUPPORTED);
 }
 
-static void dev_SetProperty(void) {
+static void dev_SetProperty(void) { JC(6);
   Dev *d = dev_of(ARG(0));
   uint32_t prop = ARG(1), hdr = ARG(2);
   int ax = prop_axis(d, hdr);
@@ -332,7 +356,7 @@ static void dev_SetProperty(void) {
   RET(3, DI_OK);
 }
 
-static void dev_Acquire(void) { Dev *d = dev_of(ARG(0)); int was = d->acquired; d->acquired = 1; RET(1, was ? DI_NOEFFECT : DI_OK); }
+static void dev_Acquire(void) { JC(7); Dev *d = dev_of(ARG(0)); int was = d->acquired; d->acquired = 1; RET(1, was ? DI_NOEFFECT : DI_OK); }
 static void dev_Unacquire(void) { Dev *d = dev_of(ARG(0)); d->acquired = 0; d->bhead = d->btail = 0; RET(1, DI_OK); }
 
 static int32_t scale_axis(Dev *d, int a, double v) { /* v in [-1,1] */
@@ -369,7 +393,7 @@ static void joy_buffer_changes(Dev *d) {
   if (p != d->last_pov) { int o = find_mapped(d, OBJ_POV, 0); if (o >= 0) buf_push(d, o, (uint32_t)p); d->last_pov = p; }
 }
 
-static void dev_GetDeviceState(void) { /* (this, cb, data) */
+static void dev_GetDeviceState(void) { JC(9); /* (this, cb, data) */
   Dev *d = dev_of(ARG(0));
   uint32_t cb = ARG(1), data = ARG(2);
   pump_host_events();
@@ -403,7 +427,7 @@ static void dev_GetDeviceState(void) { /* (this, cb, data) */
   RET(3, DI_OK);
 }
 
-static void dev_GetDeviceData(void) { /* (this, cbObj, rgdod, inout, flags) */
+static void dev_GetDeviceData(void) { JC(10); /* (this, cbObj, rgdod, inout, flags) */
   Dev *d = dev_of(ARG(0));
   uint32_t cbo = ARG(1), out = ARG(2), inout = ARG(3), flags = ARG(4);
   pump_host_events();
@@ -471,9 +495,9 @@ static void dev_SetDataFormat(void) { /* (this, df) */
 }
 
 static void dev_SetEventNotification(void) { RET(2, DI_OK); }
-static void dev_SetCooperativeLevel(void) { RET(3, DI_OK); }
-static void dev_GetObjectInfo(void) { RET(4, DIERR_UNSUPPORTED); }
-static void dev_GetDeviceInfo(void) { Dev *d = dev_of(ARG(0)); fill_devinst(ARG(1), d->type, d->pad); RET(2, DI_OK); }
+static void dev_SetCooperativeLevel(void) { JC(13); RET(3, DI_OK); }
+static void dev_GetObjectInfo(void) { JC(14); RET(4, DIERR_UNSUPPORTED); }
+static void dev_GetDeviceInfo(void) { JC(15); Dev *d = dev_of(ARG(0)); fill_devinst(ARG(1), d->type, d->pad); RET(2, DI_OK); }
 static void dev_RunControlPanel(void) { RET(3, DI_OK); }
 static void dev_Initialize(void) { RET(4, DI_OK); }
 static void dev_CreateEffect(void) { if (ARG(3)) ST32(ARG(3), 0); RET(5, DIERR_UNSUPPORTED); }
@@ -483,7 +507,11 @@ static void dev_GetForceFeedbackState(void) { RET(2, DIERR_UNSUPPORTED); }
 static void dev_SendForceFeedbackCommand(void) { RET(2, DIERR_UNSUPPORTED); }
 static void dev_EnumCreatedEffectObjects(void) { RET(4, DI_OK); }
 static void dev_Escape(void) { RET(2, DIERR_UNSUPPORTED); }
-static void dev_Poll(void) { RET(1, DI_NOEFFECT); }
+static void dev_Poll(void) { /* the game acquires a joystick only after Poll reports it is not acquired */
+  JC(25);
+  Dev *d = dev_of(ARG(0));
+  RET(1, d->acquired ? DI_NOEFFECT : DIERR_NOTACQUIRED);
+}
 static void dev_SendDeviceData(void) { RET(5, DIERR_UNSUPPORTED); }
 static void dev_EnumEffectsInFile(void) { RET(5, DIERR_UNSUPPORTED); }
 static void dev_WriteEffectToFile(void) { RET(5, DIERR_UNSUPPORTED); }

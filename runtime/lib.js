@@ -289,9 +289,20 @@ addToLibrary({
     return new Promise(res => {
       let done = false;
       const fin = () => { if (!done) { done = true; st.last = performance.now(); res(); } };
-      requestAnimationFrame(fin);
-      // keep running (at low rate) when the tab is in the background
-      setTimeout(fin, document.hidden ? 16 : 50); // hidden tabs get no rAF: keep ~60 fps so online peers don't time out (audible tabs aren't throttled)
+      // Animation frames pace the game (vsync). When they stop coming (background tab, covered
+      // or minimized window) a worker timer takes over: workers are not throttled like page
+      // timers (about one per second in background tabs), so the game keeps ~60 fps and online
+      // peers do not time out.
+      if (!PM.ticker) {
+        const src = 'setInterval(()=>postMessage(0),16)';
+        PM.ticker = new Worker(URL.createObjectURL(new Blob([src], {type: 'text/javascript'})));
+        PM.tickWaiters = [];
+        PM.ticker.onmessage = () => { const w = PM.tickWaiters; PM.tickWaiters = []; w.forEach(f => f()); };
+      }
+      const t0 = performance.now();
+      const wait = () => { if (document.hidden || performance.now() - t0 > 34) fin(); else PM.tickWaiters.push(wait); };
+      PM.tickWaiters.push(wait);
+      if (!document.hidden) requestAnimationFrame(fin);
     });
   },
   js_sleep__async: true,
