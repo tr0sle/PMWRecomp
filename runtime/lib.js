@@ -372,6 +372,9 @@ addToLibrary({
     const order = [0, 1, 2, 3, 4, 5, 8, 9, 10, 11]; // A B X Y LB RB Back Start LS RS
     let b = 0;
     order.forEach((src, i) => { if (bp(src)) b |= 1 << i; });
+    // the triggers are also buttons 10 (LT) and 11 (RT), so both can be held at once
+    if (bv(6) > 0.3) b |= 1 << 10;
+    if (bv(7) > 0.3) b |= 1 << 11;
     HEAPU32[btnp >> 2] = b;
     const up = bp(12), dn = bp(13), lf = bp(14), rt = bp(15);
     let pov = -1;

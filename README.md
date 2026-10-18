@@ -22,6 +22,26 @@ executable and no decompilation. To play, each person uses **their own copy** of
 
 Requires a browser with JSPI (current Chrome or Edge).
 
+## Controls
+
+| Action | Xbox-style gamepad | Keyboard |
+|---|---|---|
+| Accelerate | A or RT | Up |
+| Brake / reverse | B | Down |
+| Steer | Left stick or d-pad | Left / Right |
+| Hop / drift | LT or RB | Left Shift |
+| Fire power-up | X | Space |
+| Throw power-up | Y | Left Ctrl |
+| Drop power-up | LB | X |
+| Power pellet | Left stick click | C |
+| Guardian | Right stick click | Z |
+| Combo | D-pad up | V |
+| Look back | Back/View or d-pad down | B |
+| Pause | Start/Menu | Esc or P |
+
+In menus: A / Enter confirms, B / Esc goes back. Press a button on the gamepad once the page is
+open so the browser exposes it. Bindings live in `web/overlay/Win32.ini`.
+
 ## Building
 
 Requirements: Python 3 with `pefile` and `capstone`, [emsdk](https://emscripten.org)

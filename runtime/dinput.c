@@ -37,10 +37,11 @@ static const DevObj joy_objs[] = {
   {G_BUTTON, OBJ_BUTTON, 0, "Button 0"}, {G_BUTTON, OBJ_BUTTON, 1, "Button 1"}, {G_BUTTON, OBJ_BUTTON, 2, "Button 2"},
   {G_BUTTON, OBJ_BUTTON, 3, "Button 3"}, {G_BUTTON, OBJ_BUTTON, 4, "Button 4"}, {G_BUTTON, OBJ_BUTTON, 5, "Button 5"},
   {G_BUTTON, OBJ_BUTTON, 6, "Button 6"}, {G_BUTTON, OBJ_BUTTON, 7, "Button 7"}, {G_BUTTON, OBJ_BUTTON, 8, "Button 8"},
-  {G_BUTTON, OBJ_BUTTON, 9, "Button 9"}, {G_POV, OBJ_POV, 0, "Hat Switch"},
+  {G_BUTTON, OBJ_BUTTON, 9, "Button 9"}, {G_BUTTON, OBJ_BUTTON, 10, "Button 10"},
+  {G_BUTTON, OBJ_BUTTON, 11, "Button 11"}, {G_POV, OBJ_POV, 0, "Hat Switch"},
 };
 #define NJOY_AXES 5
-#define NJOY_BUTTONS 10
+#define NJOY_BUTTONS 12 /* A B X Y LB RB Back Start LS RS LT RT */
 static const DevObj mouse_objs[] = {
   {G_XAXIS, OBJ_AXIS, 0, "X-axis"}, {G_YAXIS, OBJ_AXIS, 1, "Y-axis"}, {G_ZAXIS, OBJ_AXIS, 2, "Wheel"},
   {G_BUTTON, OBJ_BUTTON, 0, "Button 0"}, {G_BUTTON, OBJ_BUTTON, 1, "Button 1"},
