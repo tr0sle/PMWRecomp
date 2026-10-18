@@ -75,6 +75,16 @@
   #installMsg.err { color: #ff9b9b; }
   #install .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
   #changeGame { background: none !important; color: var(--muted) !important; font-size: 13px !important; padding: 4px !important; text-decoration: underline; font-weight: 400 !important; }
+  #loading { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 12; display: none;
+             width: min(420px, calc(100% - 32px)); box-sizing: border-box; padding: 18px 22px 16px; border-radius: 14px;
+             background: rgba(10, 12, 20, .9); border: 1px solid #ffd40044; box-shadow: 0 10px 40px rgba(0,0,0,.6); text-align: center; }
+  #loading .ltitle { font-weight: 700; font-size: 17px; color: var(--accent); letter-spacing: .5px; }
+  #loading .lfile { margin-top: 2px; font-size: 13px; color: var(--muted); min-height: 1.3em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #loading .lbar { position: relative; height: 12px; margin-top: 12px; border-radius: 6px; background: #1d2230; overflow: hidden; }
+  #loading .lfill { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 6px; background: linear-gradient(90deg, #ffb000, #ffd400); transition: width .15s; }
+  #loading.indet .lfill { width: 35%; animation: lslide 1.1s ease-in-out infinite; }
+  @keyframes lslide { from { left: -35%; } to { left: 100%; } }
+  #loading .lnum { margin-top: 8px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.3em; }
 </style>
 </head>
 <body>
@@ -102,6 +112,7 @@
 </div>
 <button id="fs" title="Fullscreen">⛶ Fullscreen</button>
 <div id="status"></div>
+<div id="loading"><div class="ltitle">Loading</div><div class="lfile"></div><div class="lbar"><div class="lfill"></div></div><div class="lnum"></div></div>
 <div id="error"></div>
 <script src="gamestore.js"></script>
 <script>
@@ -113,7 +124,10 @@ const startBtn = document.getElementById('start');
 var Module = {
   canvas,
   gameAspect: 4 / 3,
-  setStatus(t) { statusEl.textContent = t || ''; },
+  // centered loading panel: setStatus(text) for steps without a size, loadProgress for files
+  setStatus(t) { if (t) Loading.show(t, null); else Loading.hide(); },
+  loadProgress(name, done, total) { Loading.show(name, total ? done / total : null, total ? (done / 1e6).toFixed(1) + ' / ' + (total / 1e6).toFixed(1) + ' MB' : ''); },
+  loadDone() { Loading.hide(); },
   print(t) { console.log(t); },
   printErr(t) { const l = window.__log || (window.__log = []); l.push(t); if (l.length > 20000) l.splice(0, 5000); if (!Module.quiet) console.warn(t); },
   onFatal(msg) { errorEl.style.display = 'block'; errorEl.textContent = 'Error: ' + msg + '\n(see the console for details)'; },
@@ -130,6 +144,26 @@ var Module = {
   },
   onAbort(what) { Module.onFatal('abort: ' + what); },
 };
+const Loading = (() => {
+  const el = document.getElementById('loading'), file = el.querySelector('.lfile'), fill = el.querySelector('.lfill'), num = el.querySelector('.lnum');
+  let showTimer = 0, hideTimer = 0;
+  const pretty = n => n.replace(/^.*\//, '').replace(/\.(xpc|ogg)$/i, '');
+  return {
+    show(text, frac, detail) {
+      clearTimeout(hideTimer);
+      file.textContent = text.endsWith('…') ? text : pretty(text);
+      el.classList.toggle('indet', frac == null);
+      if (frac != null) fill.style.width = Math.round(Math.min(1, frac) * 100) + '%'; else fill.style.width = '';
+      num.textContent = detail || (frac != null ? Math.round(frac * 100) + '%' : '');
+      /* short loads (cached files) never flash the panel */
+      if (el.style.display !== 'block' && !showTimer) showTimer = setTimeout(() => { showTimer = 0; el.style.display = 'block'; }, 200);
+    },
+    hide() {
+      clearTimeout(showTimer); showTimer = 0;
+      hideTimer = setTimeout(() => { el.style.display = 'none'; }, 150);
+    },
+  };
+})();
 window.addEventListener('resize', () => Module.resizeCanvas());
 document.getElementById('fs').onclick = () => { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); canvas.focus(); };
 

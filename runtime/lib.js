@@ -28,18 +28,34 @@ addToLibrary({
       if (hit) { PM.cache.delete(key); PM.cache.set(key, hit); return hit; }
       const ent = PM.files.get(key);
       if (!ent) return null;
-      Module.setStatus && Module.setStatus('Loading ' + ent.name + '…');
+      const progress = (done, total) => Module.loadProgress && Module.loadProgress(ent.name, done, total);
+      progress(0, ent.size);
       let data;
-      if (ent.base === 'idb:') {
-        /* the player's own copy of the game, stored in the browser (web/gamestore.js) */
-        data = await window.GameStore.read(ent.name);
-        if (!data) { console.error('missing game file', ent.name); return null; }
-      } else {
-        const r = await fetch((ent.base || Module.gameBase) + encodeURI(ent.name));
-        if (!r.ok) { console.error('fetch failed', ent.name, r.status); return null; }
-        data = new Uint8Array(await r.arrayBuffer());
+      try {
+        if (ent.base === 'idb:') {
+          /* the player's own copy of the game, stored in the browser (web/gamestore.js) */
+          data = await window.GameStore.read(ent.name);
+          if (!data) { console.error('missing game file', ent.name); return null; }
+        } else {
+          const r = await fetch((ent.base || Module.gameBase) + encodeURI(ent.name));
+          if (!r.ok) { console.error('fetch failed', ent.name, r.status); return null; }
+          /* stream the body to report progress (Content-Length is absent when compressed) */
+          const total = ent.size || Number(r.headers.get('content-length')) || 0;
+          const reader = r.body.getReader();
+          let buf = new Uint8Array(total || 1 << 20), n = 0;
+          for (;;) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            if (n + value.length > buf.length) { const nb = new Uint8Array(Math.max(buf.length * 2, n + value.length)); nb.set(buf.subarray(0, n)); buf = nb; }
+            buf.set(value, n);
+            n += value.length;
+            progress(n, total);
+          }
+          data = n === buf.length ? buf : buf.slice(0, n);
+        }
+      } finally {
+        Module.loadDone && Module.loadDone(ent.name);
       }
-      Module.setStatus && Module.setStatus('');
       const online = !!(Module.net && Module.net.room);
       for (const [file, off, from, to, onlineOnly] of Module.filePatches || []) {
         if (file !== key || (onlineOnly && !online)) continue;
