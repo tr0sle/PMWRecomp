@@ -20,5 +20,5 @@ for dll, name, fn in imports:
     missing.append(fn)
     out.append('void %s(void) { fatal("unimplemented import %s!%s"); }' % (fn, dll, name))
 out.append('')
-open(os.path.join(ROOT, "runtime", "stubs.c"), "w").write("\n".join(out))
+open(os.path.join(ROOT, "runtime", "stubs.c"), "w", newline="\n").write("\n".join(out))
 print("stubs:", len(missing), " ".join(missing))
