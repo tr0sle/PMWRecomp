@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pac-Man World Rally</title>
+<style>
+  :root { --bg: #000; --fg: #f4f4f4; --accent: #ffd400; --muted: #9a9a9a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; overflow: hidden; }
+  #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; background: #000; outline: none; }
+  #overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+             background: rgba(0,0,0,.82); text-align: center; padding: 16px; }
+  #overlay h1 { margin: 0; font-size: 28px; color: var(--accent); letter-spacing: .5px; }
+  #overlay button { font: inherit; font-size: 18px; padding: 12px 28px; border-radius: 8px; border: 0; background: var(--accent); color: #000; cursor: pointer; font-weight: 600; }
+  #overlay button:disabled { opacity: .5; cursor: default; }
+  #overlay .hint { color: var(--muted); max-width: 560px; }
+  #status { position: fixed; left: 10px; bottom: 8px; color: var(--muted); font-size: 12px; pointer-events: none; }
+  #error { position: fixed; inset: auto 12px 12px 12px; background: #3a0d0d; color: #ffdede; padding: 10px 14px; border-radius: 8px; display: none; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; max-height: 40vh; overflow: auto; }
+  #fs { position: fixed; right: 10px; top: 8px; background: rgba(255,255,255,.12); color: var(--fg); border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font: inherit; font-size: 12px; opacity: .5; }
+  #fs:hover { opacity: 1; }
+  #menu { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  #menu .btns { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  #overlay button.secondary { background: #2f6bff; color: #fff; }
+  .online { width: min(720px, 100%); max-height: 88vh; overflow: auto; text-align: left; background: #11131a; border: 1px solid #2a2f3d; border-radius: 12px; padding: 16px; box-sizing: border-box; }
+  .online h3 { margin: 14px 0 8px; font-size: 16px; color: var(--accent); }
+  .online input { font: inherit; padding: 8px 10px; border-radius: 6px; border: 1px solid #3a4152; background: #0b0d12; color: var(--fg); min-width: 0; }
+  .online input.code { letter-spacing: 3px; text-transform: uppercase; width: 9em; }
+  #overlay .online button { font-size: 15px; padding: 8px 16px; }
+  #overlay .online button.small { font-size: 13px; padding: 5px 10px; background: #2a2f3d; color: var(--fg); }
+  .online .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  .online .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 8px; }
+  .online .box { background: #181c26; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .online .box h3 { margin-top: 0; }
+  .online .chk { color: var(--muted); font-size: 14px; }
+  .online .rooms { display: flex; flex-direction: column; gap: 6px; max-height: 30vh; overflow: auto; }
+  .online .room { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #181c26; padding: 8px 12px; border-radius: 8px; }
+  .online .room small { display: block; color: var(--muted); }
+  .online .empty { color: var(--muted); padding: 8px 0; }
+  .online .bigcode { font: 700 26px ui-monospace, monospace; letter-spacing: 4px; color: var(--accent); }
+  .online .members { padding-left: 20px; }
+  .online .hint { color: var(--muted); font-size: 13px; }
+  .online .chat { height: 90px; overflow: auto; background: #0b0d12; border-radius: 6px; padding: 6px 8px; font-size: 13px; margin-bottom: 6px; }
+  .online .chat + input { width: 100%; box-sizing: border-box; }
+  .online .ostatus { color: #ff9b9b; min-height: 1.4em; margin-top: 8px; }
+  .online .tabs button { background: transparent !important; color: var(--muted) !important; padding: 4px 0 !important; }
+  .toast { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); background: #222838; color: var(--fg); padding: 8px 14px; border-radius: 8px; z-index: 20; }
+  .netbadge { position: fixed; left: 10px; top: 8px; background: rgba(0,0,0,.6); color: #9fe39f; font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 6px; border: 1px solid #2f4f2f; cursor: pointer; z-index: 15; }
+  .online h4 { margin: 12px 0 6px; color: var(--accent); font-size: 14px; }
+  .online .cols2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .online .settings { display: flex; flex-direction: column; gap: 8px; }
+  .online .field { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
+  .online .field span { color: var(--muted); }
+  .online select { font: inherit; font-size: 14px; padding: 6px 8px; border-radius: 6px; border: 1px solid #3a4152; background: #0b0d12; color: var(--fg); max-width: 60%; }
+  .online select:disabled { opacity: 1; color: var(--fg); background: #141822; }
+  .online .members li { margin: 4px 0; }
+  .online .tiny { font-size: 12px !important; padding: 2px 7px !important; margin-left: 8px; background: #3a1d1d !important; color: #ffb3b3 !important; }
+  .online .chat .sys { color: var(--muted); font-style: italic; }
+  .online.ingame { position: fixed; right: 12px; top: 44px; width: min(560px, calc(100% - 24px)); z-index: 16; max-height: calc(100vh - 60px); }
+  .online.ingame button { font: inherit; font-size: 14px; padding: 7px 14px; border-radius: 8px; border: 0; background: var(--accent); color: #000; cursor: pointer; font-weight: 600; }
+  .online.ingame button.small { background: #2a2f3d; color: var(--fg); font-size: 13px; padding: 5px 10px; }
+  .drivebanner { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: rgba(10,12,20,.92); border: 1px solid #ffd40055; color: var(--fg); padding: 10px 18px; border-radius: 10px; z-index: 14; text-align: center; max-width: min(640px, calc(100% - 32px)); }
+  .drivebanner small { display: block; color: var(--muted); margin-top: 4px; }
+  .drivebanner button { margin-top: 8px; font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 6px; border: 0; background: #2a2f3d; color: var(--fg); cursor: pointer; }
+  #install { display: none; width: min(620px, 100%); text-align: left; background: #11131a; border: 1px solid #2a2f3d; border-radius: 12px; padding: 18px 20px; box-sizing: border-box; }
+  #install h2 { margin: 0 0 8px; color: var(--accent); font-size: 20px; }
+  #install ol { padding-left: 20px; color: #d6d6d6; }
+  #install li { margin: 4px 0; }
+  #install code { background: #0b0d12; padding: 1px 5px; border-radius: 4px; }
+  #drop { margin-top: 12px; border: 2px dashed #3a4152; border-radius: 10px; padding: 18px; text-align: center; color: var(--muted); }
+  #drop.over { border-color: var(--accent); color: var(--fg); }
+  #install .bar { height: 8px; background: #0b0d12; border-radius: 4px; overflow: hidden; margin-top: 12px; display: none; }
+  #install .bar div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  #installMsg { margin-top: 8px; min-height: 1.4em; color: var(--muted); }
+  #installMsg.err { color: #ff9b9b; }
+  #install .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  #changeGame { background: none !important; color: var(--muted) !important; font-size: 13px !important; padding: 4px !important; text-decoration: underline; font-weight: 400 !important; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="canvas" tabindex="0" width="640" height="480"></canvas></div>
+<div id="overlay">
+  <div id="install">
+    <h2>Carregue o seu jogo</h2>
+    <div>Este site não tem os arquivos do Pac-Man World Rally: você usa a <b>sua própria cópia</b> do jogo para PC.</div>
+    <ol>
+      <li>Abra a pasta onde o jogo está instalado (a que tem o <code>PMR.exe</code>).</li>
+      <li>Clique com o botão direito na pasta → <b>Enviar para</b> → <b>Pasta compactada (zipada)</b>.</li>
+      <li>Escolha ou arraste aqui o <b>.zip</b> criado.</li>
+    </ol>
+    <div id="drop">Arraste o .zip aqui ou <button id="pick" class="secondary">Escolher arquivo .zip</button><input id="zipInput" type="file" accept=".zip,application/zip" hidden></div>
+    <div class="bar"><div></div></div>
+    <div id="installMsg"></div>
+    <div class="note">Os arquivos ficam guardados só neste navegador (não são enviados para o servidor). Você só precisa fazer isso uma vez.</div>
+  </div>
+  <div id="menu">
+  <h1>Pac-Man World Rally</h1>
+  <div class="btns"><button id="start" disabled>Carregando…</button><button id="online" class="secondary" disabled>Jogar online</button></div>
+  <div class="hint">Teclado: setas para dirigir, Enter/Espaço para confirmar, Esc para voltar. Controles de jogo (gamepad) funcionam se você apertar um botão neles antes de começar.</div>
+  <button id="changeGame" style="display:none">Trocar os arquivos do jogo</button>
+  </div>
+</div>
+<button id="fs" title="Tela cheia">⛶ Tela cheia</button>
+<div id="status"></div>
+<div id="error"></div>
+<script src="gamestore.js"></script>
+<script>
+'use strict';
+const canvas = document.getElementById('canvas');
+const statusEl = document.getElementById('status');
+const errorEl = document.getElementById('error');
+const startBtn = document.getElementById('start');
+var Module = {
+  canvas,
+  gameAspect: 4 / 3,
+  setStatus(t) { statusEl.textContent = t || ''; },
+  print(t) { console.log(t); },
+  printErr(t) { const l = window.__log || (window.__log = []); l.push(t); if (l.length > 20000) l.splice(0, 5000); if (!Module.quiet) console.warn(t); },
+  onFatal(msg) { errorEl.style.display = 'block'; errorEl.textContent = 'Erro: ' + msg + '\n(veja o console para detalhes)'; },
+  onExit(code) { Module.setStatus('O jogo terminou (código ' + code + ').'); },
+  onMessageBox(text, caption) { errorEl.style.display = 'block'; errorEl.textContent = (caption ? caption + ': ' : '') + text; },
+  resizeCanvas() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let w = window.innerWidth, h = window.innerHeight;
+    if (w / h > Module.gameAspect) w = Math.round(h * Module.gameAspect); else h = Math.round(w / Module.gameAspect);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+    if (canvas.width !== bw || canvas.height !== bh) { canvas.width = bw; canvas.height = bh; }
+  },
+  onAbort(what) { Module.onFatal('abort: ' + what); },
+};
+window.addEventListener('resize', () => Module.resizeCanvas());
+document.getElementById('fs').onclick = () => { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); canvas.focus(); };
+
+function loadSaves() {
+  return new Promise(res => {
+    let rq;
+    try { rq = indexedDB.open('pmwr-saves', 1); } catch (e) { return res(); }
+    rq.onupgradeneeded = () => rq.result.createObjectStore('files');
+    rq.onerror = () => res();
+    rq.onsuccess = () => {
+      const db = rq.result, files = [], dirs = [];
+      const tx = db.transaction('files', 'readonly');
+      const cur = tx.objectStore('files').openCursor();
+      cur.onsuccess = () => {
+        const c = cur.result;
+        if (!c) return;
+        if (c.value && c.value.dir) dirs.push(c.key);
+        else if (c.value) files.push([c.key, {name: c.value.name, data: new Uint8Array(c.value.data)}]);
+        c.continue();
+      };
+      tx.oncomplete = () => { Module.savedFiles = files; Module.savedDirs = dirs; db.close(); res(); };
+      tx.onerror = () => res();
+    };
+  });
+}
+
+// The player's own game files: the server has none in production, so ask for a .zip once
+// and keep it in the browser (gamestore.js).
+function askForGame() {
+  const panel = document.getElementById('install'), msg = document.getElementById('installMsg');
+  const bar = panel.querySelector('.bar'), fill = bar.firstElementChild, input = document.getElementById('zipInput'), drop = document.getElementById('drop');
+  menu.style.display = 'none';
+  panel.style.display = 'block';
+  return new Promise(resolve => {
+    let busy = false;
+    async function use(file) {
+      if (busy || !file) return;
+      busy = true;
+      msg.className = '';
+      bar.style.display = 'block';
+      try {
+        const meta = await GameStore.importZip(file, (f, t) => { fill.style.width = Math.round(f * 100) + '%'; msg.textContent = t; });
+        panel.style.display = 'none';
+        menu.style.display = '';
+        resolve(meta);
+      } catch (e) {
+        msg.className = 'err';
+        msg.textContent = e.message || String(e);
+        bar.style.display = 'none';
+      } finally { busy = false; }
+    }
+    document.getElementById('pick').onclick = () => input.click();
+    input.onchange = () => use(input.files[0]);
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); use(e.dataTransfer.files[0]); });
+  });
+}
+
+(async () => {
+  Module.setStatus('Carregando lista de arquivos…');
+  const manifest = await (await fetch('manifest.json')).json();
+  await loadSaves();
+  const ready = new Promise(res => { Module.onRuntimeInitialized = res; });
+  const s = document.createElement('script');
+  s.src = 'pmr.js';
+  document.body.appendChild(s);
+  if (manifest.gameOnServer) Module.manifest = manifest.files;
+  else {
+    let info = await GameStore.info();
+    if (!info) { Module.setStatus(''); info = await askForGame(); }
+    Module.manifest = info.files.map(([name, size]) => [name, size, 'idb:']).concat(manifest.files);
+    const change = document.getElementById('changeGame');
+    change.style.display = '';
+    change.onclick = async () => { if (confirm('Remover os arquivos do jogo deste navegador e carregar outro .zip?')) { await GameStore.clear(); location.reload(); } };
+  }
+  Module.setStatus('Carregando código do jogo…');
+  await ready;
+  Module.setStatus('');
+  startBtn.disabled = false;
+  startBtn.textContent = 'Jogar sozinho';
+  onlineBtn.disabled = false;
+  startBtn.focus();
+  Online.startGame = startGame;
+  const resumed = await Online.resume();
+  if ((resumed && !window.gameStarted) || (!resumed && new URLSearchParams(location.search).get('room'))) onlineBtn.click();
+})().catch(e => Module.onFatal(String(e)));
+
+const onlineBtn = document.getElementById('online');
+const menu = document.getElementById('menu');
+function startGame(args) {
+  if (window.gameStarted) return;
+  window.gameStarted = true;
+  Module.audioContext = new AudioContext();
+  document.getElementById('overlay').style.display = 'none';
+  canvas.focus();
+  Module.resizeCanvas();
+  Online.updateBadge();
+  const extra = (new URLSearchParams(location.search).get('args') || '').split(' ').filter(Boolean);
+  try { Module.callMain(args.concat(extra)); } catch (e) { if (e !== 'unwind') Module.onFatal(String(e)); }
+}
+startBtn.onclick = () => startGame([]);
+onlineBtn.onclick = () => {
+  menu.style.display = 'none';
+  const ov = document.getElementById('overlay');
+  ov.addEventListener('back', () => { menu.style.display = ''; }, {once: true});
+  Online.build(ov, startGame);
+};
+</script>
+<script src="online.js"></script>
+</body>
+</html>

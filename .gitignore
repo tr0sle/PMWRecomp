@@ -1,0 +1,13 @@
+# Nothing from the game itself goes into the repository: no game files, no code generated
+# from PMR.exe, no decompilation. Everything here is rebuilt from your own copy of the game.
+gen/
+build/
+dist/
+deploy/*.zip
+deploy/config.env
+analysis/*
+!analysis/ghidra_procs.json
+*.o
+__pycache__/
+*.pyc
+.claude/
