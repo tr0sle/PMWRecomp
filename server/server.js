@@ -33,7 +33,17 @@ function serveFile(req, res, root, rel) {
   fs.stat(full, (err, st) => {
     if (err || !st.isFile()) { res.writeHead(404); res.end('not found'); return; }
     const headers = {'Content-Type': MIME[path.extname(full).toLowerCase()] || 'application/octet-stream',
-                     'Content-Length': st.size, 'Cache-Control': 'no-cache'};
+                     'Content-Length': st.size, 'Cache-Control': 'no-cache', 'Accept-Ranges': 'bytes'};
+    /* single byte ranges (the lobby reads track pictures out of Intrface.xpc) */
+    const m = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || '');
+    if (m) {
+      const start = Number(m[1]), end = Math.min(m[2] ? Number(m[2]) : st.size - 1, st.size - 1);
+      if (start > end) { res.writeHead(416, {'Content-Range': 'bytes */' + st.size}); res.end(); return; }
+      res.writeHead(206, {...headers, 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${st.size}`});
+      if (req.method === 'HEAD') { res.end(); return; }
+      fs.createReadStream(full, {start, end}).pipe(res);
+      return;
+    }
     res.writeHead(200, headers);
     if (req.method === 'HEAD') { res.end(); return; }
     fs.createReadStream(full).pipe(res);
@@ -196,7 +206,7 @@ function cleanSettings(s) {
 }
 
 function memberList(r) {
-  return [...r.members.values()].map(m => ({name: m.name, ip: ipKey(m.ip), owner: m === r.owner, away: !!m.away}));
+  return [...r.members.values()].map(m => ({name: m.name, ip: ipKey(m.ip), owner: m === r.owner, away: !!m.away, char: m.char || 0}));
 }
 
 const sendTo = (m, data) => { if (m.ws && !m.away && m.ws.open) m.ws.send(data); };
@@ -261,13 +271,16 @@ function join(c, r, token) {
 const cleanName = (s, def) => (String(s || '').replace(/[^\p{L}\p{N} _.\-!?]/gu, '').trim().slice(0, 20) || def);
 
 function onClient(ws) {
-  const c = {ws, name: 'Player', room: null, ip: null};
+  const c = {ws, name: 'Player', room: null, ip: null, char: 0};
   ws.onmessage = msg => {
     if (typeof msg !== 'string') { route(c, msg); return; }
     let m;
     try { m = JSON.parse(msg); } catch (e) { return; }
     switch (m.t) {
-      case 'hello': c.name = cleanName(m.name, 'Player'); break;
+      case 'hello':
+        c.name = cleanName(m.name, 'Player');
+        if (Number.isInteger(m.char) && m.char >= 0 && m.char < 16) c.char = m.char;
+        break;
       case 'list':
         ws.send(JSON.stringify({t: 'rooms', rooms: [...rooms.values()].filter(r => r.public).map(roomInfo)}));
         break;
@@ -286,6 +299,23 @@ function onClient(ws) {
         break;
       }
       case 'leave': leave(c); break;
+      case 'ping': ws.send(JSON.stringify({t: 'pong', id: m.id})); break;
+      case 'char': /* character picked in the web lobby (index in the game's roster) */
+        c.char = Number.isInteger(m.char) && m.char >= 0 && m.char < 16 ? m.char : 0;
+        if (c.room) broadcastMembers(c.room);
+        break;
+      case 'matchReady': /* this player's game is in the match lobby with its character confirmed */
+        if (c.room) {
+          const out = JSON.stringify({t: 'matchReady', ip: ipKey(c.ip), seq: Number(m.seq) || 0});
+          for (const mm of c.room.members.values()) sendTo(mm, out);
+        }
+        break;
+      case 'matchFailed': /* a player's game could not get into the match: tell everybody */
+        if (c.room) {
+          const out = JSON.stringify({t: 'matchFailed', ip: ipKey(c.ip), name: c.name, msg: String(m.msg || '').slice(0, 200)});
+          for (const mm of c.room.members.values()) sendTo(mm, out);
+        }
+        break;
       case 'playing':
         if (c.room && c.room.owner === c) { c.room.playing = !!m.value; broadcastMembers(c.room); }
         break;

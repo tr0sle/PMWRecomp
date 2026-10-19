@@ -18,7 +18,17 @@
     return dbp;
   }
   const req = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-  const done = tx => new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = tx.onabort = () => rej(tx.error || new Error('could not save')); });
+  const done = tx => new Promise((res, rej) => {
+    tx.oncomplete = res;
+    tx.onerror = tx.onabort = () => rej(storageError(tx.error));
+  });
+  function storageError(e) {
+    const name = e && e.name || '';
+    if (name === 'QuotaExceededError' || /quota/i.test(e && e.message || ''))
+      return new Error('Not enough storage space in this browser for the game files (about 470 MB). Free some space on the device and try again.');
+    return new Error('Could not save the game files in this browser' + (e ? ' (' + (e.name || '') + (e.message ? ': ' + e.message : '') + ')' : '') +
+      '. Private/incognito tabs cannot store them: use a normal tab.');
+  }
 
   async function info() {
     try {
@@ -32,6 +42,14 @@
     const blob = await req(d.transaction('files').objectStore('files').get(name.toLowerCase()));
     if (!blob) return null;
     return new Uint8Array(await blob.arrayBuffer());
+  }
+
+  // part of a stored file, without reading all of it
+  async function readRange(name, start, end) {
+    const d = await db();
+    const blob = await req(d.transaction('files').objectStore('files').get(name.toLowerCase()));
+    if (!blob) return null;
+    return new Uint8Array(await blob.slice(start, end).arrayBuffer());
   }
 
   async function clear() {
@@ -94,7 +112,8 @@
     if (lh.getUint32(0, true) !== 0x04034b50) throw new Error('The .zip is damaged.');
     const start = e.off + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
     const raw = file.slice(start, start + e.csize);
-    if (e.method === 0) return raw;
+    /* a slice of the picked file can stop being readable later (mobile file providers): copy it */
+    if (e.method === 0) return new Blob([await raw.arrayBuffer()]);
     if (e.method !== 8) throw new Error('The .zip uses an unsupported compression method. Create it with Windows ("Send to > Compressed (zipped) folder").');
     const blob = await new Response(raw.stream().pipeThrough(new DecompressionStream('deflate-raw'))).blob();
     if (blob.size !== e.size) throw new Error('Erro ao descompactar ' + e.name + '.');
@@ -114,7 +133,10 @@
     const exe = all.find(e => /(^|\/)pmr\.exe$/i.test(e.name));
     if (!exe) throw new Error('PMR.exe was not found in the .zip. Zip the folder where the game is installed.');
     const base = exe.name.slice(0, exe.name.length - 'PMR.exe'.length);
-    const files = all.filter(e => e.name.startsWith(base) && !/(^|\/)\./.test(e.name.slice(base.length)))
+    /* only what the game reads: no launcher, DLLs, readme or extra folders */
+    const unneeded = rel => /(^|\/)\./.test(rel) || (/\.(exe|dll|txt|url|ini|lnk)$/i.test(rel) && !/^pmr\.exe$/i.test(rel)) ||
+                            (rel.includes('/') && !/^streams\//i.test(rel));
+    const files = all.filter(e => e.name.startsWith(base) && !unneeded(e.name.slice(base.length)))
                      .map(e => ({...e, rel: e.name.slice(base.length)}));
     const names = new Set(files.map(f => f.rel.toLowerCase()));
     const missing = REQUIRED.filter(r => !names.has(r));
@@ -129,6 +151,13 @@
     await clear();
     const d = await db();
     const total = files.reduce((s, f) => s + f.size, 0);
+    if (navigator.storage && navigator.storage.estimate) {
+      try {
+        const {quota, usage} = await navigator.storage.estimate();
+        if (quota && quota - (usage || 0) < total * 1.05)
+          throw new Error(`Not enough storage space in this browser: the game needs ${Math.ceil(total / 1e6)} MB and only ${Math.floor((quota - (usage || 0)) / 1e6)} MB are available. Free some space on the device and try again.`);
+      } catch (e) { if (/storage space/.test(e.message)) throw e; }
+    }
     let doneBytes = 0;
     const list = [];
     for (const f of files) {
@@ -148,5 +177,5 @@
     return meta;
   }
 
-  window.GameStore = {info, read, clear, importZip};
+  window.GameStore = {info, read, readRange, clear, importZip};
 })();

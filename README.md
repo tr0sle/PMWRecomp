@@ -21,10 +21,14 @@ executable and no decompilation. To play, each person uses **their own copy** of
    - The files stay in your browser (IndexedDB) and are never uploaded to the server.
 3. **Play solo** or **Play online**:
    - Public or private rooms (6-letter code or invite link), up to 4 players.
-   - The room owner picks the mode (race, circuit, 5 battle modes), the track, CPUs and options.
-   - The match starts automatically for everyone.
-  
-  YOU CAN DOWNLOAD THE GAME .ZIP HERE: https://www.myabandonware.com/game/pac-man-world-rally-f1i#download
+   - Everything is set up in the web room: mode (race, circuit, 5 battle modes), track or arena
+     (with pictures), bots and options; each player picks their character.
+   - **Start match** takes every game straight into the race: the game's own network menus are
+     driven behind a "Starting match" screen. In game, the ping shows in the top-left corner.
+4. Every track, cup and character is unlocked (the game's own `UnlockAll` setting).
+
+On phones and tablets, on-screen controls appear (stick + buttons; turn the phone sideways).
+The game files need about 470 MB of browser storage.
 
 Requires a browser with JSPI (current Chrome or Edge).
 
@@ -32,14 +36,14 @@ Requires a browser with JSPI (current Chrome or Edge).
 
 | Action | Xbox-style gamepad | Keyboard |
 |---|---|---|
-| Accelerate | A or RT | Up |
+| Accelerate | A | Up |
 | Brake / reverse | B | Down |
 | Steer | Left stick or d-pad | Left / Right |
-| Hop / drift | LT or RB | Left Shift |
-| Fire power-up | X | Space |
-| Throw power-up | Y | Left Ctrl |
-| Drop power-up | LB | X |
-| Power pellet | Left stick click | C |
+| Hop / drift | RT or RB | Left Shift |
+| Fire power-up | LT or X | Space |
+| Power pellet (Big Pac-Man, when the meter is full) | Y | C |
+| Throw power-up | LB | Left Ctrl |
+| Drop power-up | Left stick click | X |
 | Guardian | Right stick click | Z |
 | Combo | D-pad up | V |
 | Look back | Back/View or d-pad down | B |

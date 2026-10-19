@@ -28,6 +28,6 @@ emcc $OPT build/*.o -o dist/pmr.js \
   -sMALLOC=emmalloc -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sENVIRONMENT=web \
   -sEXPORTED_RUNTIME_METHODS=callMain,HEAPU8,HEAP32 -sINVOKE_RUN=0 -sEXIT_RUNTIME=0 \
   --profiling-funcs ${LDEXTRA:-}
-cp web/index.html web/online.js web/gamestore.js web/test2.html dist/
+cp web/index.html web/online.js web/gamestore.js web/touch.js web/test2.html dist/
 rm -rf dist/overlay && cp -r web/overlay dist/overlay
 echo "build ok: $(ls -la dist/pmr.wasm | awk '{print $5}') bytes"

@@ -106,7 +106,7 @@
   <div id="menu">
   <h1>Pac-Man World Rally</h1>
   <div class="btns"><button id="start" disabled>Loading…</button><button id="online" class="secondary" disabled>Play online</button></div>
-  <div class="hint">Keyboard: arrows to drive, Enter/Space to confirm, Esc to go back. Gamepads work if you press a button on them before starting.</div>
+  <div class="hint">Keyboard: arrows to drive, Enter/Space to confirm, Esc to go back. Gamepads work if you press a button on them before starting. On phones and tablets, on-screen controls appear (turn the phone sideways).</div>
   <button id="changeGame" style="display:none">Change game files</button>
   </div>
 </div>
@@ -265,6 +265,16 @@ function startGame(args) {
   const extra = (new URLSearchParams(location.search).get('args') || '').split(' ').filter(Boolean);
   try { Module.callMain(args.concat(extra)); } catch (e) { if (e !== 'unwind') Module.onFatal(String(e)); }
 }
+// Everything unlocked: the "locked" flags that the game's own UnlockAll option clears when it
+// creates a profile (game settings object at 0x523680), cleared here for existing profiles too.
+const LOCK_FLAGS = [0x3d04, 0x4dac, 0x4dd4, 0x4dd8, 0x4ddc, 0x4de0, 0x4e30, 0x4e50, 0x4e5c, 0x4e60, 0x4e64];
+for (let k = 0; k < 8; k++) LOCK_FLAGS.push(0x4e04 + 4 * k, 0x4148 + 0x50 * k, 0x45ec + 0x44 * k, 0x4acc + 0x58 * k);
+for (let k = 0; k < 12; k++) LOCK_FLAGS.push(0x3dd4 + 0x10 * k);
+function unlockAll() {
+  const H = Module.HEAP32;
+  if (H) for (const off of LOCK_FLAGS) H[(0x523680 + off) >> 2] = 0;
+}
+setInterval(() => { if (window.gameStarted) unlockAll(); }, 500);
 startBtn.onclick = () => startGame([]);
 onlineBtn.onclick = () => {
   menu.style.display = 'none';
@@ -274,5 +284,6 @@ onlineBtn.onclick = () => {
 };
 </script>
 <script src="online.js"></script>
+<script src="touch.js"></script>
 </body>
 </html>
