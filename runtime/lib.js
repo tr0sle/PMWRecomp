@@ -359,6 +359,8 @@ addToLibrary({
     return n;
   },
   js_gamepad_state: function (index, axesp, btnp, povp) {
+    /* while the page owns the input (online room setting the match up, room panel) pads read as idle */
+    if (Module.inputBlocked && Module.inputBlocked()) return 0;
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     let pad = null, k = 0;
     for (const p of pads) if (p && p.connected) { if (k === index) { pad = p; break; } k++; }

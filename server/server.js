@@ -226,7 +226,7 @@ function leave(c) {
   const left = JSON.stringify({t: 'left', ip: ipKey(c.ip), name: c.name});
   for (const m of r.members.values()) sendTo(m, left);
   if (!r.members.size) { rooms.delete(r.code); return; }
-  if (r.owner === c) r.owner = [...r.members.values()].find(m => !m.away) || r.members.values().next().value;
+  if (r.owner === c) { r.owner = [...r.members.values()].find(m => !m.away) || r.members.values().next().value; r.hostReady = 0; }
   broadcastMembers(r);
 }
 
@@ -263,6 +263,9 @@ function join(c, r, token) {
   }
   c.room = r;
   c.away = false;
+  if ([...r.members.values()].some(o => o !== c && o.char === c.char)) {
+    for (let k = 0; k < 14; k++) if (![...r.members.values()].some(o => o !== c && o.char === k)) { c.char = k; break; }
+  }
   if (!r.owner) r.owner = c;
   c.ws.send(JSON.stringify({t: 'joined', ip: ipKey(c.ip), token: c.token, room: roomInfo(r), members: memberList(r)}));
   broadcastMembers(r);
@@ -300,13 +303,26 @@ function onClient(ws) {
       }
       case 'leave': leave(c); break;
       case 'ping': ws.send(JSON.stringify({t: 'pong', id: m.id})); break;
-      case 'char': /* character picked in the web lobby (index in the game's roster) */
-        c.char = Number.isInteger(m.char) && m.char >= 0 && m.char < 16 ? m.char : 0;
+      case 'char': /* character picked in the web lobby (index in the game's roster); one per player */
+        if (Number.isInteger(m.char) && m.char >= 0 && m.char < 16) {
+          if (c.room && [...c.room.members.values()].some(o => o !== c && o.char === m.char))
+            ws.send(JSON.stringify({t: 'error', msg: 'Another player already picked that character.'}));
+          else c.char = m.char;
+        }
         if (c.room) broadcastMembers(c.room);
+        break;
+      case 'needLobby': /* a player's game cannot find the owner's match: the owner opens a new one */
+        if (c.room && c.room.owner && c.room.owner !== c) sendTo(c.room.owner, JSON.stringify({t: 'needLobby', name: c.name}));
+        break;
+      case 'go': /* the owner's game started the match */
+        if (c.room && c.room.owner === c) {
+          const out = JSON.stringify({t: 'go'});
+          for (const mm of c.room.members.values()) if (mm !== c) sendTo(mm, out);
+        }
         break;
       case 'matchReady': /* this player's game is in the match lobby with its character confirmed */
         if (c.room) {
-          const out = JSON.stringify({t: 'matchReady', ip: ipKey(c.ip), seq: Number(m.seq) || 0});
+          const out = JSON.stringify({t: 'matchReady', ip: ipKey(c.ip), ver: Number(m.ver) || 0});
           for (const mm of c.room.members.values()) sendTo(mm, out);
         }
         break;
@@ -332,10 +348,11 @@ function onClient(ws) {
           broadcastMembers(r);
         }
         break;
-      case 'hostReady':
+      case 'hostReady': /* the owner's game has a match lobby open; ver identifies that lobby */
         if (c.room && c.room.owner === c) {
-          c.room.hostReady = c.room.startSeq;
-          const out = JSON.stringify({t: 'hostReady', seq: c.room.startSeq});
+          c.room.hostReady = Number(m.ver) || 0;
+          if (c.room.playing) { c.room.playing = false; broadcastMembers(c.room); } /* back in a lobby: no match running */
+          const out = JSON.stringify({t: 'hostReady', ver: c.room.hostReady});
           for (const mm of c.room.members.values()) if (mm !== c) sendTo(mm, out);
         }
         break;

@@ -11,6 +11,7 @@
   canvas { display: block; background: #000; outline: none; }
   #overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
              background: rgba(0,0,0,.82); text-align: center; padding: 16px; }
+  #overlay.solid { background: #05070d; z-index: 16; }
   #overlay h1 { margin: 0; font-size: 28px; color: var(--accent); letter-spacing: .5px; }
   #overlay button { font: inherit; font-size: 18px; padding: 12px 28px; border-radius: 8px; border: 0; background: var(--accent); color: #000; cursor: pointer; font-weight: 600; }
   #overlay button:disabled { opacity: .5; cursor: default; }
@@ -248,20 +249,23 @@ function askForGame() {
   onlineBtn.disabled = false;
   startBtn.focus();
   Online.startGame = startGame;
+  Online.showGame = showGame;
   const resumed = await Online.resume();
-  if ((resumed && !window.gameStarted) || (!resumed && new URLSearchParams(location.search).get('room'))) onlineBtn.click();
+  if ((resumed && (!window.gameStarted || window.gameHidden)) || (!resumed && new URLSearchParams(location.search).get('room'))) onlineBtn.click();
 })().catch(e => Module.onFatal(String(e)));
 
 const onlineBtn = document.getElementById('online');
 const menu = document.getElementById('menu');
-function startGame(args) {
+// background: the game boots behind the online room (which sets the match up out of sight);
+// showGame() brings it to the front when the match starts.
+function startGame(args, background) {
   if (window.gameStarted) return;
   window.gameStarted = true;
+  window.gameHidden = !!background;
   Module.audioContext = new AudioContext();
-  document.getElementById('overlay').style.display = 'none';
-  canvas.focus();
+  if (background) document.getElementById('overlay').classList.add('solid');
+  else showGame();
   Module.resizeCanvas();
-  Online.updateBadge();
   const extra = (new URLSearchParams(location.search).get('args') || '').split(' ').filter(Boolean);
   try { Module.callMain(args.concat(extra)); } catch (e) { if (e !== 'unwind') Module.onFatal(String(e)); }
 }
@@ -275,12 +279,21 @@ function unlockAll() {
   if (H) for (const off of LOCK_FLAGS) H[(0x523680 + off) >> 2] = 0;
 }
 setInterval(() => { if (window.gameStarted) unlockAll(); }, 500);
+function showGame() {
+  window.gameHidden = false;
+  const ov = document.getElementById('overlay');
+  ov.style.display = 'none';
+  ov.classList.remove('solid');
+  if (Module.audioContext && Module.audioContext.state === 'suspended') Module.audioContext.resume();
+  canvas.focus();
+  Online.updateBadge();
+}
 startBtn.onclick = () => startGame([]);
 onlineBtn.onclick = () => {
   menu.style.display = 'none';
   const ov = document.getElementById('overlay');
   ov.addEventListener('back', () => { menu.style.display = ''; }, {once: true});
-  Online.build(ov, startGame);
+  Online.build(ov, startGame, showGame);
 };
 </script>
 <script src="online.js"></script>

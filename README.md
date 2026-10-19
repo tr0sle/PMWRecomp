@@ -23,8 +23,9 @@ executable and no decompilation. To play, each person uses **their own copy** of
    - Public or private rooms (6-letter code or invite link), up to 4 players.
    - Everything is set up in the web room: mode (race, circuit, 5 battle modes), track or arena
      (with pictures), bots and options; each player picks their character.
-   - **Start match** takes every game straight into the race: the game's own network menus are
-     driven behind a "Starting match" screen. In game, the ping shows in the top-left corner.
+   - While the players are in the room, each game loads and sets the match up out of sight
+     (the game's own network menus are driven behind the room page), so **Start match** goes
+     straight into the race. In game, the ping shows in the top-left corner.
 4. Every track, cup and character is unlocked (the game's own `UnlockAll` setting).
 
 On phones and tablets, on-screen controls appear (stick + buttons; turn the phone sideways).

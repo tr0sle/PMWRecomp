@@ -50,6 +50,7 @@
   .online .chars { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 6px; }
   .online .char { padding: 0 !important; border: 2px solid transparent !important; border-radius: 10px !important; background: #1a1f2c !important; cursor: pointer; color: var(--fg) !important; font: inherit; font-weight: 400 !important; }
   .online .char.sel { border-color: var(--accent) !important; background: #2d2a12 !important; }
+  .online .char:disabled { opacity: .35; cursor: default; }
   .online .char .face, .online .members .face { display: block; width: 100%; aspect-ratio: 1; background: #2a3042 center / contain no-repeat; border-radius: 8px; }
   .online .char small { display: block; font-size: 10px; padding: 2px 0 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; }
   .online .members { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -224,7 +225,7 @@
     });
   }
 
-  const readyIps = new Map(); /* match seq -> Set of players whose game is ready in the match lobby */
+  const readyIps = new Map(); /* owner's lobby id -> Set of players whose game is ready in it */
   const failedIps = new Set();
   function handle(m) {
     switch (m.t) {
@@ -239,21 +240,26 @@
         if (pending) { pending.resolve(); pending = null; }
         onState();
         break;
-      case 'members': net.room = m.room; net.members = m.members; onState(); cover.players(); break;
+      case 'members': net.room = m.room; net.members = m.members; onState(); cover.update(); break;
       case 'left': net.leftIps.push(ipToInt(m.ip)); addChat(null, m.name + ' left the room'); break;
       case 'chat': addChat(m.name, m.text); break;
       case 'start': onStart(m); break;
-      case 'hostReady': hostReadySeq = Math.max(hostReadySeq, m.seq); break;
+      case 'hostReady': hostReadyVer = Math.max(hostReadyVer, m.ver || 0); onState(); break;
       case 'matchReady':
-        if (!readyIps.has(m.seq)) readyIps.set(m.seq, new Set());
-        readyIps.get(m.seq).add(m.ip);
-        cover.players();
+        if (!readyIps.has(m.ver)) readyIps.set(m.ver, new Set());
+        readyIps.get(m.ver).add(m.ip);
+        onState();
+        cover.update();
         break;
       case 'matchFailed': /* the owner stops waiting for that player */
         failedIps.add(m.ip);
         addChat(null, m.name + ' could not get into the match' + (m.msg ? ' (' + m.msg + ')' : ''));
         break;
       case 'pong': ping.pong(m.id); break;
+      case 'go': if (stage.wantStart && !stage.playing) reveal(); break;
+      case 'needLobby': /* someone cannot see our match in their list: open a fresh one (at most every 25 s) */
+        if (isOwner() && !stage.playing && Date.now() - stage.recreatedAt > 25000) { stage.lobbyFor = ''; t('lobby asked for by ' + m.name); }
+        break;
       case 'kicked':
         session.del('pmwr-room');
         net.room = null;
@@ -291,62 +297,50 @@
   }
 
   // ---------------------------------------------------------------- "starting match" screen
-  // Covers the game (and mutes it) while the driver goes through the game's menus.
+  // Shown from "Start match" until the race is on screen (normally a moment: the games are
+  // already waiting in the match lobby).
   const cover = (() => {
-    let root = null, seq = 0, settings = null, onCancel = null, muteTimer = 0;
+    let root = null;
     function build() {
       root = el('div', {id: 'matchcover'}, el('div', {class: 'card'},
         el('div', {class: 'ctitle'}, 'Starting match'),
         el('div', {class: 'ctrack'}), el('div', {class: 'cdesc'}),
         el('ul', {class: 'cplayers'}),
         el('div', {class: 'lbar'}, el('div', {class: 'lfill'})),
-        el('div', {class: 'cstep'}), el('div', {class: 'cerr'}), el('div', {class: 'cbtns'})));
+        el('div', {class: 'cstep'}), el('div', {class: 'cbtns'})));
       document.body.append(root);
     }
     const q = s => root.querySelector(s);
-    function mute(on) {
-      clearInterval(muteTimer);
-      const set = v => { const pm = Module.PM; if (pm && pm.master) pm.master.gain.value = v; };
-      if (on) { set(0); muteTimer = setInterval(() => set(0), 250); } else set(1);
-    }
+    const visible = () => !!root && root.style.display === 'flex';
     return {
-      get visible() { return !!root && root.style.display === 'flex'; },
-      show(s, matchSeq, cancel) {
+      get visible() { return visible(); },
+      show(s) {
         if (!root) build();
-        seq = matchSeq; settings = s; onCancel = cancel;
-        const pics = picsOf(s);
+        const pics = picsOf(s || defaultSettings());
         const pic = q('.ctrack');
         pic.style.backgroundImage = '';
         if (pics.length) Thumbs.get('w' + pics[0]).then(u => { if (u) pic.style.backgroundImage = `url(${u})`; });
-        q('.cdesc').textContent = describe(s);
-        q('.cerr').textContent = '';
-        q('.lbar').style.display = '';
-        q('.cbtns').replaceChildren(el('button', {onclick: () => onCancel && onCancel()}, 'Cancel'));
-        this.players();
-        this.step('Starting the game…');
+        q('.cdesc').textContent = describe(s || defaultSettings());
+        q('.cbtns').replaceChildren(el('button', {onclick: () => { stage.wantStart = false; this.hide(); }}, 'Back to the room'));
         root.style.display = 'flex';
-        mute(true);
+        this.update();
       },
-      step(t) { if (root) q('.cstep').textContent = t; },
-      players() {
-        if (!root || !net.room) return;
-        const ready = readyIps.get(seq) || new Set();
+      update() {
+        if (!visible() || !net.room) return;
+        q('.cstep').textContent = stage.status;
+        const ready = readyOf(isOwner() ? stage.myVer : hostVer());
         q('.cplayers').replaceChildren(...net.members.filter(m => !m.away).map(m => el('li', {class: ready.has(m.ip) ? 'ready' : ''},
-          face(m.char), (m.owner ? '★ ' : '') + m.name, el('small', {}, ready.has(m.ip) ? 'ready' : 'loading…'))));
+          face(m.char), (m.owner ? '★ ' : '') + m.name, el('small', {}, ready.has(m.ip) ? 'ready' : 'getting ready…'))));
       },
-      fail(msg, buttons) {
-        if (!root) build();
-        root.style.display = 'flex';
-        q('.lbar').style.display = 'none';
-        q('.cstep').textContent = '';
-        q('.cerr').textContent = msg;
-        q('.cbtns').replaceChildren(...buttons.map(([t, fn]) => el('button', {onclick: fn}, t)));
-      },
-      hide() { if (root) root.style.display = 'none'; mute(false); },
+      hide() { if (root) root.style.display = 'none'; },
     };
   })();
 
   // ---------------------------------------------------------------- game driver
+  // While the players are in the web room, each game boots behind it (muted, input blocked) and
+  // the driver gets it ready through the game's own NETWORK PLAY menus: the owner's game keeps a
+  // match lobby open with the room's settings, the others join it, and everybody's character is
+  // picked and confirmed. "Start match" then only has to press START GAME.
   // Addresses in the recompiled game (PMR.exe), found by observing the menus.
   const A_SCREEN = 0x5f7ea0;   // index of the active interface screen
   const A_CHAR = 0x525814;     // characters picked in the match lobby (+ 1), one int per lobby slot
@@ -357,99 +351,97 @@
   const m8 = a => Module.HEAPU8[a];
   const m32 = a => Module.HEAP32[a >> 2];
   const screen = () => m32(A_SCREEN);
-  let driving = false, cancelled = false;
 
   const trace = window.__drv = [];
   const t = msg => { trace.push(((performance.now() / 1000) | 0) + 's scr=' + screen() + ' ' + msg); if (trace.length > 300) trace.shift(); };
-  async function key(k) {
-    if (cancelled) throw new Error('cancelled');
+  const stage = {
+    running: false, playing: false,   /* playing: the match runs and the game is on screen */
+    lobbyFor: '', myVer: 0,           /* owner: settings and id of the match lobby its game has open */
+    joinedVer: 0,                     /* others: the owner's lobby their game is in */
+    isReady: false, readyChar: -1, readyVer: 0,
+    wantStart: false, wantStartAt: 0, status: '', recreatedAt: 0,
+  };
+  class Restage extends Error {}
+  class Fatal extends Error {} /* the game is somewhere the driver cannot safely leave */
+  async function key(k, hold = 70, gap = 170) {
+    if (!net.room) throw new Restage('left the room');
+    while (window.__pauseDriver) await sleep(200); /* debugging aid */
     t('key ' + k);
     const q = Module.PM.events;
     q.push(1, KEY[k], 1, 0);
-    await sleep(100);
+    await sleep(hold);
     q.push(1, KEY[k], 0, 0);
-    await sleep(260);
+    await sleep(gap);
   }
   async function until(fn, ms) {
     const t0 = Date.now();
-    while (Date.now() - t0 < ms) { if (cancelled) throw new Error('cancelled'); if (fn()) return true; await sleep(100); }
+    while (Date.now() - t0 < ms) { if (fn()) return true; await sleep(80); }
     return fn();
   }
+  function setStatus(s) { if (stage.status !== s) { stage.status = s; onState(); cover.update(); } }
 
-  async function toMainMenu() {
-    for (let i = 0; i < 240; i++) {
-      const s = screen();
-      if (s === SCR.main) return;
-      if (s === SCR.title || s === SCR.intro) {
-        await key('enter'); /* also skips the intro movies */
-        await until(() => screen() !== s, s === SCR.intro ? 1500 : 4000);
-      } else if (s === SCR.netlist || s === SCR.settings || s === SCR.details || s === SCR.lobby) {
-        await key('esc'); /* back out of the network screens */
-        await until(() => screen() !== s, 2500);
-      } else await sleep(500);
-    }
-    throw new Error('the game did not reach the main menu');
+  /* main menu -> NETWORK PLAY. The main menu always opens with its cursor on RACE, and NETWORK
+   * PLAY is 2 items below (the last item is EXIT TO WINDOWS, so Enter is never pressed blindly). */
+  async function mainToNetwork() {
+    await sleep(900); /* the menu ignores input while it slides in */
+    await key('down', 80, 450);
+    await key('down', 80, 450);
+    await key('enter');
+    if (!await until(() => screen() === SCR.netlist, 6000)) throw new Fatal('could not open NETWORK PLAY');
+    await sleep(400);
   }
 
-  /* The menu cursor lives in the interface's object pool, whose layout depends on the
-   * screens opened so far, so it is located at run time: the value that moves 1 step
-   * with Down and back with Up (5 items, wrapping). */
-  async function findMenuCursor() {
-    const lo = 0x5e0000 >> 2, hi = 0x620000 >> 2;
-    const snap = () => Module.HEAP32.slice(lo, hi);
-    const a = snap(); await key('down'); await sleep(250);
-    const b = snap(); await key('up'); await sleep(250);
-    const c = snap();
-    const hits = [];
-    for (let i = 0; i < a.length; i++) {
-      const v = a[i];
-      if (v >= 1 && v <= 5 && c[i] === v && b[i] === (v === 5 ? 1 : v + 1)) hits.push((i + lo) * 4);
-    }
-    return hits.length ? hits[0] : 0;
-  }
-
+  /* to the network game list, from boot or from any network screen */
   async function toNetworkList() {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      await toMainMenu();
-      await sleep(800);
-      const cur = await findMenuCursor();
-      if (cur) {
-        for (let i = 0; i < 6 && m32(cur) !== 3; i++) await key('down');
-      } else if (attempt === 0) {
-        await key('down'); await key('down'); /* fresh boot: the cursor starts on RACE */
-      }
-      await key('enter');
-      if (await until(() => screen() === SCR.netlist, 8000)) { await sleep(600); return; }
-      /* wrong item: go back to the main menu and try again */
-      for (let i = 0; i < 4 && screen() !== SCR.main; i++) { await key('esc'); await sleep(900); }
+    for (let i = 0; i < 400 && (screen() === SCR.title || screen() === SCR.intro); i++) {
+      const s = screen();
+      await key('enter'); /* also skips the intro movies */
+      await until(() => screen() !== s, 1200);
     }
-    throw new Error('could not open NETWORK PLAY');
+    for (let i = 0; i < 10; i++) {
+      const s = screen();
+      if (s === SCR.netlist) return;
+      if (s === SCR.main) return mainToNetwork();
+      if (![SCR.settings, SCR.details, SCR.lobby].includes(s)) { await sleep(400); continue; }
+      await key('esc');
+      await until(() => screen() !== s, 2500);
+      await sleep(300);
+    }
+    throw new Fatal('lost track of the game menus');
+  }
+
+  /* searches the network again: the list only searches when it opens */
+  async function reopenNetworkList() {
+    await toNetworkList();
+    await key('esc');
+    if (!await until(() => screen() === SCR.main, 4000)) throw new Fatal('could not leave the network list');
+    await mainToNetwork();
   }
 
   async function adjust(read, target, cyclic) {
     for (let i = 0; i < 24; i++) {
       const v = read();
       if (v === target) return true;
-      await key(cyclic || v < target ? 'right' : 'left');
-      await sleep(150);
-      if (!cyclic && read() === v) return read() === target; /* reached the end of the list */
+      await key(cyclic || v < target ? 'right' : 'left', 60, 110);
+      if (!cyclic && read() === v) { await sleep(120); if (read() === v) return read() === target; } /* end of the list */
     }
     return read() === target;
   }
 
+  /* owner: open a match lobby with the room's settings (from wherever the game is) */
   async function hostMatch(s) {
     const mode = modeOf(s.mode);
-    cover.step('Creating the match…');
+    stage.isReady = false;
     await toNetworkList();
     await key('enter'); /* Create Network Game */
-    if (!await until(() => screen() === SCR.settings, 10000)) throw new Error('the match setup screen did not open');
-    await sleep(700);
+    if (!await until(() => screen() === SCR.settings, 8000)) throw new Error('the match setup screen did not open');
+    await sleep(500);
     await adjust(() => m8(ST + 4), s.maxPlayers, false);
     await key('down');
     await adjust(() => m8(ST + 3), s.cpu, false);
     await key('down');
     if (!await adjust(() => m8(ST + 5), mode.id, true)) throw new Error('could not select the game mode');
-    await sleep(400);
+    await sleep(250);
     if (mode.kind === 'circuit') {
       await key('down');
       if (!await adjust(() => m8(ST + 6), s.world, true)) throw new Error('could not select the cup');
@@ -457,73 +449,46 @@
       if (mode.opt) {
         await key('down');
         const o = mode.opt;
-        const rd = o.size === 1 ? () => m8(o.addr) : () => m32(o.addr);
-        await adjust(rd, s.option || o.def, false);
+        await adjust(o.size === 1 ? () => m8(o.addr) : () => m32(o.addr), s.option || o.def, false);
       }
       await key('down');
       if (!await adjust(() => m8(ST + 0xc), s.world, true)) throw new Error('could not select the track');
     }
-    await sleep(300);
+    await sleep(200);
     await key('enter');
-    if (!await until(() => screen() === SCR.lobby, 10000)) throw new Error('the match lobby did not open');
-    await sleep(1200);
-    send({t: 'hostReady'});
+    if (!await until(() => screen() === SCR.lobby, 8000)) throw new Error('the match lobby did not open');
+    await sleep(700);
   }
 
-  async function joinMatch(seq) {
-    cover.step('Joining the room owner\'s match…');
-    await toNetworkList();
-    /* wait until the owner's game has really been created (it is listed earlier, while still being set up) */
-    const readyNow = () => hostReadySeq >= seq || (net.room && net.room.hostReady >= seq);
-    if (seq && !readyNow()) cover.step('Waiting for the room owner\'s game…');
-    if (seq && !await until(readyNow, 300000)) throw new Error('the owner has not opened the match yet');
-    cover.step('Joining the room owner\'s match…');
-    const t0 = Date.now();
-    await sleep(1000);
-    let told = false, tries = 0;
-    while (Date.now() - t0 < 15 * 60000) {
-      if (!told && Date.now() - t0 > 25000) {
-        told = true;
-        cover.step('The owner\'s match is still in progress: you will join as soon as it ends.');
-      }
-      const cur = screen();
-      if (cur === SCR.lobby) return;
-      if (cur === SCR.settings || cur === SCR.details) {
-        /* back out of whatever opened (never confirm anything except JOIN GAME) */
-        await key('esc');
-        await until(() => screen() === SCR.netlist, 4000);
-        continue;
-      }
-      if (cur !== SCR.netlist) { await toNetworkList(); continue; }
-      if (tries++ > 0) {
-        /* the list only searches when the screen opens: leave to the main menu and come back */
-        await key('esc');
-        await until(() => screen() === SCR.main, 5000);
-        await sleep(800);
-        await toNetworkList();
-      }
-      await sleep(2500);
+  /* others: join the owner's match lobby */
+  async function joinMatch() {
+    stage.isReady = false;
+    for (let tries = 0; tries < 6; tries++) {
+      if (screen() === SCR.lobby) return;
+      if (tries) await reopenNetworkList(); else await toNetworkList();
+      await sleep(4500);    /* "Searching for Games…" lists the owner's game after a few seconds */
       await key('down');
       await key('enter');
-      await until(() => screen() !== SCR.netlist, 4000);
+      await until(() => screen() !== SCR.netlist, 3000);
       const s = screen();
       if (s === SCR.details) {
-        await sleep(600);
-        await key('enter'); /* JOIN GAME */
-        if (await until(() => screen() === SCR.lobby, 10000)) return;
-        continue;
-      }
-      if (s === SCR.settings) { /* the list was still empty: we opened "Create"; go back and wait */
-        await sleep(1500); /* the screen ignores input while it slides in */
+        for (let i = 0; i < 3 && screen() === SCR.details; i++) {
+          await sleep(1200); /* the screen ignores input while it slides in */
+          await key('enter'); /* JOIN GAME */
+          if (await until(() => screen() === SCR.lobby, 5000)) { await sleep(500); return; }
+        }
+      } else if (s === SCR.settings) { /* the list was still empty: we opened "Create"; go back */
+        if (tries >= 1) send({t: 'needLobby'});
+        await sleep(1200); /* the screen ignores input while it slides in */
         await key('esc');
-        await until(() => screen() === SCR.netlist, 5000);
+        await until(() => screen() === SCR.netlist, 4000);
+        await sleep(800);
       }
-      await sleep(1500);
     }
-    throw new Error('the owner\'s match did not show up');
+    throw new Error("the owner's match did not show up");
   }
 
-  /* in the match lobby: Left/Right change the character, Enter confirms ("READY!") */
+  /* in the match lobby: Left/Right change the character, Enter confirms ("READY!"), Esc un-confirms */
   function mySlot() {
     const name = net.name || playerName();
     for (let k = 0; k < 8; k++) {
@@ -534,77 +499,150 @@
     }
     return 0;
   }
-  async function pickCharacter(ch) {
-    await sleep(800);
-    const want = ch + 1, slot = mySlot(), cur = () => m8(A_CHAR + 4 * slot);
-    for (let i = 0; i < 20 && cur() !== want; i++) { await key('right'); await sleep(150); }
-    t('slot ' + slot + ' character ' + cur() + ' wanted ' + want);
-    await key('enter');
-    await sleep(500);
+  async function ensureReady(ch, ver) {
+    if (screen() !== SCR.lobby) return;
+    if (!stage.isReady || stage.readyChar !== ch) {
+      if (stage.isReady) { await key('esc'); await sleep(300); stage.isReady = false; }
+      if (screen() !== SCR.lobby) return;
+      const want = ch + 1, slot = mySlot(), cur = () => m8(A_CHAR + 4 * slot);
+      /* one step at a time: held or quick presses skip characters */
+      /* (a joiner's own choice only shows up after a round trip through the owner's game) */
+      for (let i = 0; i < 20 && cur() !== want; i++) {
+        const before = cur();
+        await key('right', 80, 150);
+        await until(() => cur() !== before, 3000);
+        await sleep(250);
+      }
+      t('slot ' + slot + ' character ' + cur() + ' wanted ' + want);
+      await key('enter');
+      await sleep(250);
+      stage.isReady = true;
+      stage.readyChar = ch;
+      stage.readyVer = 0;
+    }
+    if (stage.readyVer !== ver) { stage.readyVer = ver; send({t: 'matchReady', ver}); }
   }
 
-  function everyoneReady(seq) {
-    const ready = readyIps.get(seq) || new Set();
+  const hostVer = () => Math.max(hostReadyVer, (net.room && net.room.hostReady) || 0);
+  function readyOf(ver) { return readyIps.get(ver) || new Set(); }
+  function everyoneReady(ver) {
+    const ready = readyOf(ver);
     return net.members.filter(m => !m.away && !failedIps.has(m.ip)).every(m => ready.has(m.ip));
   }
+  const myCharacter = () => { const me = net.members.find(m => m.ip === net.ipStr); return me && Number.isInteger(me.char) ? me.char : myChar(); };
 
-  async function drive(asHost, s, seq) {
-    if (driving) return;
-    driving = true;
-    cancelled = false;
-    Module.inputBlocked = () => driving;
-    const cancel = () => { cancelled = true; };
-    cover.show(s, seq, cancel);
-    if (window.Online.updateBadge) window.Online.updateBadge();
-    try {
-      await until(() => Module.PM && Module.HEAP32, 90000);
-      if (asHost) await hostMatch(s); else await joinMatch(seq);
-      cover.step('Choosing your character…');
-      const me = net.members.find(m => m.ip === net.ipStr);
-      await pickCharacter(me && Number.isInteger(me.char) ? me.char : myChar());
-      send({t: 'matchReady', seq});
-      if (asHost) {
-        cover.step('Waiting for the other players…');
-        await until(() => everyoneReady(seq), 300000);
-        await sleep(1500);
-        for (let i = 0; i < 6 && screen() === SCR.lobby; i++) {
-          cover.step('Starting…');
-          await key('enter'); /* START GAME */
-          await until(() => screen() !== SCR.lobby, 3000);
-        }
-        if (screen() === SCR.lobby) throw new Error('the game did not start the match');
-      } else {
-        cover.step('Waiting for the room owner to start…');
-        await until(() => screen() !== SCR.lobby, 300000);
-        if (screen() === SCR.lobby) throw new Error('the match did not start');
+  async function stageStep() {
+    if (isOwner()) {
+      const want = JSON.stringify(net.room.settings || defaultSettings());
+      if (screen() !== SCR.lobby || stage.lobbyFor !== want) {
+        setStatus(stage.lobbyFor ? 'Updating the match…' : 'Setting up the match…');
+        stage.lobbyFor = '';
+        await hostMatch(JSON.parse(want));
+        stage.lobbyFor = want;
+        stage.myVer = stage.recreatedAt = Date.now();
+        send({t: 'hostReady', ver: stage.myVer});
       }
-      cover.hide();
-    } catch (e) {
-      if (!cancelled) send({t: 'matchFailed', msg: e.message});
-      cover.fail(cancelled ? 'Cancelled.' : 'Could not get into the match: ' + e.message + '.', [
-        ['Back to the room', () => { session.set('pmwr-open-room', 1); location.reload(); }],
-        ['Show the game', () => cover.hide()],
-      ]);
-    } finally {
-      driving = false;
-      cancelled = false;
-      updateBadge();
+      await ensureReady(myCharacter(), stage.myVer);
+      if (stage.wantStart) {
+        const waited = Date.now() - stage.wantStartAt;
+        if (everyoneReady(stage.myVer) || waited > 60000) {
+          setStatus('Starting…');
+          await key('enter'); /* START GAME (shown once every player in the lobby is ready) */
+          await sleep(600);
+          send({t: 'go'});
+          reveal();
+          return;
+        } else setStatus('Waiting for the other players…');
+      } else setStatus(everyoneReady(stage.myVer) ? 'Ready' : 'Waiting for the other players…');
+      return;
     }
+    const hv = hostVer();
+    if (stage.wantStart && stage.isReady && screen() !== SCR.lobby) { reveal(); return; } /* the owner started */
+    if (!hv || (net.room.playing && !stage.wantStart)) {
+      setStatus(net.room.playing ? 'A match is in progress' : 'Waiting for the room owner\'s game…');
+      if (![SCR.netlist, SCR.lobby].includes(screen())) await toNetworkList();
+      return;
+    }
+    if (screen() !== SCR.lobby) {
+      setStatus('Joining the room owner\'s match…');
+      await joinMatch();
+      stage.joinedVer = hv;
+    } else if (stage.joinedVer !== hv) {
+      /* the owner opened a new lobby (settings changed): see whether this game was dropped */
+      await sleep(2500);
+      if (screen() !== SCR.lobby) return;
+      stage.joinedVer = hv;
+    }
+    await ensureReady(myCharacter(), hv);
+    setStatus(stage.wantStart ? 'Waiting for the room owner to start…' : 'Ready');
   }
 
-  let startHandled = 0, hostReadySeq = 0;
+  let muteTimer = 0;
+  function mute(on) {
+    clearInterval(muteTimer);
+    const set = v => { const pm = Module.PM; if (pm && pm.master) pm.master.gain.value = v; };
+    if (on) { set(0); muteTimer = setInterval(() => set(0), 250); } else set(1);
+  }
+
+  /* boots the game behind the room and keeps it ready until the match starts */
+  async function startStaging() {
+    if (stage.running || stage.playing || !net.room) return;
+    if (!window.gameStarted) window.Online.startGame(['-network'], true);
+    else if (!window.gameHidden) return; /* a match already ran on this page */
+    stage.running = true;
+    Module.inputBlocked = () => !stage.playing || !!ingame;
+    mute(true);
+    setStatus('Loading the game…');
+    try {
+      await until(() => Module.PM && Module.HEAP32 && screen() >= 0, 180000);
+      let errors = 0;
+      while (net.room && !stage.playing) {
+        try { await stageStep(); errors = 0; }
+        catch (e) {
+          if (e instanceof Restage) break;
+          t('error ' + e.message);
+          if (e instanceof Fatal) {
+            /* start the game over (the page keeps the room seat), at most a couple of times */
+            const n = (session.get('pmwr-restarts') || 0) + 1;
+            session.set('pmwr-restarts', n);
+            if (n <= 2) { setStatus('Restarting the game…'); await sleep(800); location.reload(); return; }
+            setStatus('Could not set the match up: ' + e.message + '. Reload the page to try again.');
+            return;
+          }
+          if (++errors >= 3) setStatus('Having trouble: ' + e.message + ' (retrying)');
+          stage.lobbyFor = '';
+          await sleep(1500);
+        }
+        await sleep(200);
+      }
+    } finally { stage.running = false; }
+  }
+
+  function reveal() {
+    session.del('pmwr-restarts');
+    stage.playing = true;
+    stage.wantStart = false;
+    cover.hide();
+    mute(false);
+    window.Online.showGame();
+    updateBadge();
+  }
+
+  let startHandled = 0, hostReadyVer = 0;
   function onStart(m) {
     if (m.seq <= startHandled) return;
     startHandled = m.seq;
-    const asHost = m.host === net.ipStr;
-    if (window.gameStarted) {
-      /* a new match: restart the page (keeps the room seat) so every game starts from the same point */
-      session.set('pmwr-autostart', {seq: m.seq, host: asHost, settings: m.settings});
+    if (stage.playing) {
+      /* a new match after one already ran: restart the page (keeps the room seat) so every game
+       * starts from the same point */
+      session.set('pmwr-autostart', {seq: m.seq});
       location.reload();
       return;
     }
-    window.Online.startGame(['-network']);
-    drive(asHost, m.settings, m.seq);
+    stage.wantStart = true;
+    stage.wantStartAt = Date.now();
+    cover.show(m.settings);
+    startStaging();
   }
 
   // ---------------------------------------------------------------- views
@@ -637,9 +675,12 @@
   function charPicker() {
     const wrap = el('div', {class: 'chars'});
     function render() {
-      const mine = myChar();
-      wrap.replaceChildren(...CHARACTERS.map((n, i) => el('button', {class: 'char' + (i === mine ? ' sel' : ''), title: n,
-        onclick: () => { store.set('pmwr-char', String(i)); send({t: 'char', char: i}); render(); }}, face(i), el('small', {}, n))));
+      const me = net.members.find(m => m.ip === net.ipStr);
+      const mine = me && Number.isInteger(me.char) ? me.char : myChar();
+      const taken = new Map(net.members.filter(m => m !== me).map(m => [m.char, m.name]));
+      wrap.replaceChildren(...CHARACTERS.map((n, i) => el('button', {class: 'char' + (i === mine ? ' sel' : ''),
+        title: taken.has(i) ? n + ' (' + taken.get(i) + ')' : n, disabled: taken.has(i),
+        onclick: () => { store.set('pmwr-char', String(i)); send({t: 'char', char: i}); }}, face(i), el('small', {}, taken.has(i) ? taken.get(i) : n))));
     }
     return {el: wrap, render};
   }
@@ -661,11 +702,11 @@
     chatIn.addEventListener('keyup', e => e.stopPropagation());
     const startBtn = el('button', {class: 'primary', onclick: () => send({t: 'start'})}, '▶ Start match');
     const waitEl = el('div', {class: 'hint'});
-    const joinBtn = el('button', {class: opts.inGame ? 'small' : 'primary', onclick: () => {
-      if (window.gameStarted) { if (ingame) toggleRoomPanel(); }
-      else window.Online.startGame(['-network']);
-      drive(false, net.room.settings || defaultSettings(), 0);
-    }}, 'Join the match in progress');
+    const leave = () => {
+      send({t: 'leave'}); session.del('pmwr-room'); net.room = null; net.ip = 0;
+      if (window.gameStarted) { location.reload(); return; } /* stops the game that was getting ready */
+      onState(); if (opts.onLeave) opts.onLeave();
+    };
     const view = el('div', {class: 'roomview'},
       titleEl,
       el('div', {class: 'row'}, 'Code: ', codeEl,
@@ -679,34 +720,37 @@
         el('div', {}, el('h4', {}, 'Players'), membersEl),
         el('div', {}, el('h4', {}, 'Your character'), chars.el)),
       el('h4', {}, 'Chat'), chatBox, chatIn,
-      el('div', {class: 'row'}, startBtn, waitEl, joinBtn,
-        el('button', {onclick: () => { send({t: 'leave'}); session.del('pmwr-room'); net.room = null; net.ip = 0; onState(); if (opts.onLeave) opts.onLeave(); }}, 'Leave room')),
+      el('div', {class: 'row'}, startBtn, waitEl, el('button', {onclick: leave}, 'Leave room')),
     );
     function render() {
       if (!net.room) return;
       const owner = isOwner();
       titleEl.textContent = net.room.name + (net.room.public ? ' · public' : ' · private');
       codeEl.textContent = net.room.code;
+      const ready = readyOf(owner ? stage.myVer : hostVer());
+      const state = m => m.away ? ' · reconnecting…' : ready.has(m.ip) ? ' · ✔ ready' : ' · getting ready…';
       membersEl.replaceChildren(...net.members.map(m => el('li', {},
         face(m.char),
         el('div', {style: 'flex:1'}, (m.owner ? '★ ' : '') + m.name + (m.ip === net.ipStr ? ' (you)' : ''),
-          el('small', {}, (CHARACTERS[m.char] || '') + (m.away ? ' · reconnecting…' : ''))),
+          el('small', {}, (CHARACTERS[m.char] || '') + state(m))),
         owner && m.ip !== net.ipStr ? el('button', {class: 'tiny', title: 'Remove from room', onclick: () => send({t: 'kick', ip: m.ip})}, '✕') : null)));
       form.render();
       chars.render();
       startBtn.style.display = owner ? '' : 'none';
-      startBtn.disabled = net.members.length < 1;
-      const inMatch = window.gameStarted && !driving;
-      waitEl.textContent = owner ? (net.members.length < 2 ? 'Waiting for more players (you can also start alone against bots).' : '')
-                                 : net.room.playing ? (inMatch ? '' : 'A match is in progress: you can join it.') : 'Waiting for the owner to start the match…';
-      joinBtn.style.display = !owner && net.room.playing && !driving && !inMatch ? '' : 'none';
+      const present = net.members.filter(m => !m.away);
+      const nReady = present.filter(m => ready.has(m.ip)).length;
+      startBtn.textContent = '▶ Start match' + (!stage.playing && nReady < present.length ? ` (${nReady}/${present.length} ready)` : '');
+      const mine = stage.playing ? '' : 'Your game: ' + (stage.status || 'loading…');
+      waitEl.textContent = [mine, owner ? (net.members.length < 2 ? 'You can also start alone against bots.' : '')
+                                        : (net.room.playing && !stage.playing ? 'A match is in progress.' : 'The owner starts the match.')].filter(Boolean).join(' · ');
     }
     return {el: view, render, dispose: () => chatViews.delete(chatBox)};
   }
 
   let built = null;
-  function build(container, startGame) {
+  function build(container, startGame, showGame) {
     window.Online.startGame = startGame;
+    if (showGame) window.Online.showGame = showGame;
     if (built && built.isConnected) return; /* already open */
     const statusEl = el('div', {class: 'ostatus'});
     const status = tx => { statusEl.textContent = tx || ''; };
@@ -775,6 +819,7 @@
       room.render();
       updateBadge();
       if (net.room && isOwner() && net.room.settings) store.set('pmwr-last-settings', JSON.stringify(net.room.settings));
+      if (net.room) startStaging(); /* the game gets the match ready while the players are in the room */
     };
     onState();
     const refresh = () => connect().then(() => send({t: 'list'})).catch(e => status(e.message));
@@ -794,7 +839,7 @@
       node.className = typeof ms !== 'number' || ms > 150 ? 'bad' : ms > 80 ? 'mid' : '';
     }
     setInterval(() => {
-      const on = window.gameStarted && net.room && net.connected;
+      const on = window.gameStarted && !window.gameHidden && net.room && net.connected;
       if (node) node.style.display = on && !cover.visible ? 'block' : 'none';
       if (!on) return;
       if (last && Date.now() - last > 6000) show('—');
@@ -817,7 +862,7 @@
 
   let badge, ingame;
   function updateBadge() {
-    if (!window.gameStarted) return;
+    if (!window.gameStarted || window.gameHidden) { if (badge) badge.style.display = 'none'; return; }
     if (!badge) {
       badge = el('button', {class: 'netbadge', onclick: toggleRoomPanel});
       document.body.append(badge);
@@ -827,12 +872,12 @@
     if (ingame) ingame.render();
   }
   function toggleRoomPanel() {
-    if (ingame) { ingame.wrap.remove(); ingame.dispose(); ingame = null; Module.inputBlocked = () => driving; return; }
+    if (ingame) { ingame.wrap.remove(); ingame.dispose(); ingame = null; return; }
     const v = roomView({inGame: true, onLeave: toggleRoomPanel});
     const wrap = el('div', {class: 'online ingame'}, el('div', {class: 'tabs'}, el('button', {onclick: toggleRoomPanel}, '✕ Close (back to the game)')), v.el);
     document.body.append(wrap);
     ingame = {wrap, render: v.render, dispose: v.dispose};
-    Module.inputBlocked = () => true;
+    Module.inputBlocked = () => !stage.playing || !!ingame;
     v.render();
   }
 
@@ -845,13 +890,14 @@
       await connect();
       await request({t: 'join', code: saved.code, token: saved.token});
     } catch (e) { session.del('pmwr-room'); session.del('pmwr-autostart'); return false; }
-    session.del('pmwr-open-room');
-    if (auto) {
+    if (auto) { /* the owner started a new match: get ready and go straight into it */
       session.del('pmwr-autostart');
       startHandled = auto.seq;
-      window.Online.startGame(['-network']);
-      drive(auto.host, auto.settings, auto.seq);
+      stage.wantStart = true;
+      stage.wantStartAt = Date.now();
+      cover.show(net.room.settings);
     }
+    startStaging();
     return true;
   }
 
