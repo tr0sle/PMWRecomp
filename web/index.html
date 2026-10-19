@@ -19,7 +19,8 @@
   #status { position: fixed; left: 10px; bottom: 8px; color: var(--muted); font-size: 12px; pointer-events: none; }
   #error { position: fixed; inset: auto 12px 12px 12px; background: #3a0d0d; color: #ffdede; padding: 10px 14px; border-radius: 8px; display: none; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; max-height: 40vh; overflow: auto; }
   #fs { position: fixed; right: 10px; top: 8px; background: rgba(255,255,255,.12); color: var(--fg); border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font: inherit; font-size: 12px; opacity: .5; }
-  #fs:hover { opacity: 1; }
+  #fs:hover, #ws:hover { opacity: 1; }
+  #ws { position: fixed; right: 10px; top: 40px; background: rgba(255,255,255,.12); color: var(--fg); border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font: inherit; font-size: 12px; opacity: .5; }
   #menu { display: flex; flex-direction: column; align-items: center; gap: 14px; }
   #menu .btns { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
   #overlay button.secondary { background: #2f6bff; color: #fff; }
@@ -111,6 +112,7 @@
   <button id="changeGame" style="display:none">Change game files</button>
   </div>
 </div>
+<button id="ws" title="Switch between widescreen (16:9) and the original 4:3 picture">16:9</button>
 <button id="fs" title="Fullscreen">⛶ Fullscreen</button>
 <div id="status"></div>
 <div id="loading"><div class="ltitle">Loading</div><div class="lfile"></div><div class="lbar"><div class="lfill"></div></div><div class="lnum"></div></div>
@@ -135,12 +137,14 @@ var Module = {
   onExit(code) { Module.setStatus('The game exited (code ' + code + ').'); },
   onMessageBox(text, caption) { errorEl.style.display = 'block'; errorEl.textContent = (caption ? caption + ': ' : '') + text; },
   resizeCanvas() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     let w = window.innerWidth, h = window.innerHeight;
     if (w / h > Module.gameAspect) w = Math.round(h * Module.gameAspect); else h = Math.round(w / Module.gameAspect);
     canvas.style.width = w + 'px';
     canvas.style.height = h + 'px';
-    const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+    /* render above the screen's pixel count (at least 1.5x, on top of MSAA) and let the browser
+       scale it down: sharper edges and text; capped at 3840 px wide */
+    const scale = Math.min(Math.max(window.devicePixelRatio || 1, 1.5), 2, 3840 / w);
+    const bw = Math.round(w * scale), bh = Math.round(h * scale);
     if (canvas.width !== bw || canvas.height !== bh) { canvas.width = bw; canvas.height = bh; }
   },
   onAbort(what) { Module.onFatal('abort: ' + what); },
@@ -265,7 +269,8 @@ function startGame(args, background) {
   Module.audioContext = new AudioContext();
   if (background) document.getElementById('overlay').classList.add('solid');
   else showGame();
-  Module.resizeCanvas();
+  Widescreen.apply();
+  bootTurbo();
   const extra = (new URLSearchParams(location.search).get('args') || '').split(' ').filter(Boolean);
   try { Module.callMain(args.concat(extra)); } catch (e) { if (e !== 'unwind') Module.onFatal(String(e)); }
 }
@@ -279,6 +284,61 @@ function unlockAll() {
   if (H) for (const off of LOCK_FLAGS) H[(0x523680 + off) >> 2] = 0;
 }
 setInterval(() => { if (window.gameStarted) unlockAll(); }, 500);
+
+// The copyright notice at boot (screen 0) stays up for a number of frames (about 12 s at 60 fps):
+// frames run back to back, with the game's clock 8x faster, until it is gone.
+Module.setTurbo = on => {
+  on = !!on;
+  if (Module.turbo === on) return;
+  Module.turbo = on;
+  if (Module._set_time_warp) Module._set_time_warp(on ? 8 : 1);
+};
+function bootTurbo() {
+  Module.setTurbo(true);
+  const stop = () => { Module.setTurbo(false); clearInterval(timer); };
+  let seen0 = false;
+  const timer = setInterval(() => {
+    if (!Module.HEAP32) return;
+    const scr = Module.HEAP32[0x5f7ea0 >> 2];
+    if (scr === 0) seen0 = true;
+    else if (seen0) stop();
+  }, 30);
+  setTimeout(stop, 30000);
+}
+
+// Widescreen: the game's own (console) widescreen mode. The display device (pointer at 0x81f174)
+// keeps the picture's height/width at +0x1c (0.75 = 4:3, 0.5625 = 16:9); a change is requested
+// through +0x40 and flag 4 at +0x48, and the camera then widens its horizontal field of view.
+// Loading a profile puts back the profile's value, so this is checked continuously.
+const Widescreen = (() => {
+  const btn = document.getElementById('ws');
+  let on = true;
+  try { on = localStorage.getItem('pmwr-widescreen') !== '0'; } catch (e) {}
+  function apply() {
+    Module.gameAspect = Module.forcedAspect = on ? 16 / 9 : 4 / 3;
+    btn.textContent = on ? '16:9' : '4:3';
+    Module.resizeCanvas();
+    sync();
+  }
+  function sync() {
+    if (!Module.HEAP32 || !window.gameStarted) return;
+    const buf = Module.HEAP32.buffer, U = new Uint32Array(buf), F = new Float32Array(buf);
+    const dev = U[0x81f174 >> 2];
+    if (!dev || dev & 3 || dev >= U.length * 4) return;
+    const want = on ? 0.5625 : 0.75;
+    if (Math.abs(F[(dev + 0x1c) >> 2] - want) < 1e-4 || U[(dev + 0x48) >> 2] & 4) return;
+    F[(dev + 0x40) >> 2] = want;
+    U[(dev + 0x48) >> 2] |= 4;
+  }
+  btn.onclick = () => {
+    on = !on;
+    try { localStorage.setItem('pmwr-widescreen', on ? '1' : '0'); } catch (e) {}
+    apply();
+    canvas.focus();
+  };
+  setInterval(sync, 250);
+  return {apply};
+})();
 function showGame() {
   window.gameHidden = false;
   const ov = document.getElementById('overlay');

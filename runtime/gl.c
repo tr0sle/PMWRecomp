@@ -176,7 +176,7 @@ typedef struct {
 static GLState S;
 
 /* textures */
-typedef struct { int used; GLuint id; int fmt_class; int w, h; int min_filter; int has_mips; } Tex;
+typedef struct { int used; GLuint id; int fmt_class; int w, h; int min_filter; int has_mips; int auto_mips; } Tex;
 #define MAX_TEX 8192
 static Tex texs[MAX_TEX];
 enum { FMT_RGB = 0, FMT_RGBA = 1, FMT_ALPHA = 2, FMT_LUM = 3, FMT_LUMA = 4, FMT_INT = 5 };
@@ -186,6 +186,7 @@ static int canvas_w = 640, canvas_h = 480;
 static float scale_x = 1, scale_y = 1;
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx;
 static int ctx_ok;
+static float aniso_max = 1; /* EXT_texture_filter_anisotropic, when the browser has it */
 
 /* ------------------------------------------------------------------ programs */
 typedef struct {
@@ -901,6 +902,11 @@ static void create_context(void) {
   reset_state();
   update_scale();
   glDisable(GL_DITHER);
+  if (emscripten_webgl_enable_extension(ctx, "EXT_texture_filter_anisotropic")) {
+    glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &aniso_max);
+    if (aniso_max > 16) aniso_max = 16;
+    if (aniso_max < 1) aniso_max = 1;
+  }
 }
 
 void gl_present(void) {
@@ -1285,10 +1291,16 @@ static Tex *bound_tex(void) {
   return &texs[id];
 }
 
+/* The game uploads only level 0 and mostly asks for plain GL_LINEAR. Every texture gets
+   mipmaps generated here, sampled trilinear + anisotropic: no shimmering or jaggies on
+   surfaces seen from afar. GL_NEAREST (pixel-exact art) is left alone. */
 static void fix_min_filter(Tex *t) {
   GLint f = t->min_filter;
-  if (!t->has_mips && f != GL_NEAREST && f != GL_LINEAR) f = (f == GL_NEAREST_MIPMAP_NEAREST || f == GL_NEAREST_MIPMAP_LINEAR) ? GL_NEAREST : GL_LINEAR;
+  if (t->has_mips || t->auto_mips) {
+    if (f != GL_NEAREST) f = GL_LINEAR_MIPMAP_LINEAR;
+  } else if (f != GL_NEAREST && f != GL_LINEAR) f = (f == GL_NEAREST_MIPMAP_NEAREST || f == GL_NEAREST_MIPMAP_LINEAR) ? GL_NEAREST : GL_LINEAR;
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, f);
+  if (aniso_max > 1) glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, f == GL_LINEAR_MIPMAP_LINEAR ? aniso_max : 1.0f);
 }
 
 HLE(opengl32, glTexParameteri) {
@@ -1356,10 +1368,11 @@ static void tex_image(int level, int w, int h, uint32_t fmt, uint32_t type, uint
   /* GL_INTENSITY-like internal formats keep alpha = luminance */
   if (internal == GL_INTENSITY || internal == 0x804B /* INTENSITY8 */) cls = FMT_INT;
   if (internal == 1 && cls == FMT_RGBA) cls = FMT_LUM;
-  if (level == 0) { t->fmt_class = cls; t->w = w; t->h = h; }
+  if (level == 0) { t->fmt_class = cls; t->w = w; t->h = h; t->has_mips = 0; t->auto_mips = 0; }
   if (level > 0) t->has_mips = 1;
   glTexImage2D(GL_TEXTURE_2D, level, (GLint)ofmt, w, h, 0, ofmt, otype, conv ? conv : px ? GPTR(px) : NULL);
   if (conv) { free(conv); glPixelStorei(GL_UNPACK_ALIGNMENT, unpack); }
+  if (level == 0 && px && (w > 1 || h > 1)) { glGenerateMipmap(GL_TEXTURE_2D); t->auto_mips = 1; }
   fix_min_filter(t);
 }
 

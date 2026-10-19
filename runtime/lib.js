@@ -305,6 +305,14 @@ addToLibrary({
     return new Promise(res => {
       let done = false;
       const fin = () => { if (!done) { done = true; st.last = performance.now(); res(); } };
+      // Turbo (Module.turbo, set by the page): next frame at once, without waiting for vsync.
+      // Used for screens that only wait a number of frames (the copyright notice at boot).
+      if (Module.turbo) {
+        if (!PM.turboChan) { PM.turboChan = new MessageChannel(); PM.turboQ = []; PM.turboChan.port1.onmessage = () => PM.turboQ.shift()(); }
+        PM.turboQ.push(fin);
+        PM.turboChan.port2.postMessage(0);
+        return;
+      }
       // Animation frames pace the game (vsync). When they stop coming (background tab, covered
       // or minimized window) a worker timer takes over: workers are not throttled like page
       // timers (about one per second in background tabs), so the game keeps ~60 fps and online
@@ -338,7 +346,7 @@ addToLibrary({
   js_canvas_width: function () { return Module.canvas.width; },
   js_canvas_height: function () { return Module.canvas.height; },
   js_set_canvas_size__deps: ['$PM'],
-  js_set_canvas_size: function (w, h) { PM.gameW = w; PM.gameH = h; Module.gameAspect = w / h; Module.resizeCanvas && Module.resizeCanvas(); },
+  js_set_canvas_size: function (w, h) { PM.gameW = w; PM.gameH = h; Module.gameAspect = Module.forcedAspect || w / h; Module.resizeCanvas && Module.resizeCanvas(); },
   js_set_cursor_visible: function (v) { Module.canvas.style.cursor = v ? 'default' : 'none'; },
   js_message_box: function (t, c) { console.warn('[MessageBox] ' + UTF8ToString(c) + ': ' + UTF8ToString(t)); Module.onMessageBox && Module.onMessageBox(UTF8ToString(t), UTF8ToString(c)); },
 

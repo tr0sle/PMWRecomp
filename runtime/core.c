@@ -140,10 +140,26 @@ void do_cpuid(uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d) {
   *a = *b = *c = *d = 0;
 }
 
-uint64_t do_rdtsc(void) { return (uint64_t)(emscripten_get_now() * 1e6); }
+/* The game's clock: real time, optionally running faster (set_time_warp, from the page) so
+   screens that just wait a number of frames go by quickly (the game's own frame limiter reads
+   this clock; the page also stops waiting for the display then: Module.turbo). */
+static double warp = 1, warp_real0, warp_virt0;
+static double game_now(void) {
+  double r = emscripten_get_now();
+  return warp_virt0 + (r - warp_real0) * warp;
+}
+EMSCRIPTEN_KEEPALIVE void set_time_warp(double w) {
+  if (!(w >= 1 && w <= 20)) w = 1;
+  double v = game_now();
+  warp_real0 = emscripten_get_now();
+  warp_virt0 = v;
+  warp = w;
+}
 
-uint32_t host_now_ms(void) { return (uint32_t)(uint64_t)emscripten_get_now(); }
-double host_now_us(void) { return emscripten_get_now() * 1000.0; }
+uint64_t do_rdtsc(void) { return (uint64_t)(game_now() * 1e6); }
+
+uint32_t host_now_ms(void) { return (uint32_t)(uint64_t)game_now(); }
+double host_now_us(void) { return game_now() * 1000.0; }
 
 /* static allocations in the low "system" area (never freed) */
 static uint32_t sys_brk = SYS_AREA_LO;

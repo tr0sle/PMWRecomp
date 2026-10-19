@@ -57,6 +57,8 @@
   .online .members li { display: flex; align-items: center; gap: 8px; background: #181c26; border-radius: 8px; padding: 4px 8px 4px 4px; margin: 0; }
   .online .members .face { width: 38px; flex: none; }
   .online .members small { color: var(--muted); display: block; font-size: 11px; }
+  .online .members .mping { font: 600 11px ui-monospace, monospace; padding: 2px 6px; border-radius: 5px; background: #0d1018; white-space: nowrap; }
+  .online .members .mping.good { color: #9fe39f; } .online .members .mping.mid { color: #ffd166; } .online .members .mping.bad { color: #ff7b7b; }
   .online .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px 14px; margin-top: 10px; }
   #matchcover { position: fixed; inset: 0; z-index: 17; display: none; align-items: center; justify-content: center; padding: 16px;
     background: radial-gradient(ellipse at center, #1d2a6b 0%, #0a0d1c 70%); }
@@ -184,7 +186,7 @@
   function face(ch) { const d = el('i', {class: 'face', title: CHARACTERS[ch] || ''}); Thumbs.paint(d, 'c' + (ch || 0)); return d; }
 
   // ---------------------------------------------------------------- connection
-  const net = Module.net = {ws: null, ip: 0, ipStr: '', inbox: [], leftIps: [], room: null, members: [], connected: false, name: ''};
+  const net = Module.net = {ws: null, ip: 0, ipStr: '', inbox: [], leftIps: [], room: null, members: [], connected: false, name: '', pings: {}};
   let pending = null, onState = () => updateBadge(), roomsCb = () => {};
   const chatLog = [];
   const myChar = () => { const c = Number(store.get('pmwr-char', '0')); return c >= 0 && c < CHARACTERS.length ? c : 0; };
@@ -255,7 +257,12 @@
         failedIps.add(m.ip);
         addChat(null, m.name + ' could not get into the match' + (m.msg ? ' (' + m.msg + ')' : ''));
         break;
-      case 'pong': ping.pong(m.id); break;
+      case 'hpong': ping.pong(m.id); break;
+      case 'hping': send({t: 'hpong', id: m.id, to: m.from}); break; /* we own the room: answer at once */
+      case 'pings': /* only the numbers change: no full redraw */
+        net.pings = m.pings || {};
+        for (const n of document.querySelectorAll('.mping[data-ip]')) paintPing(n, net.pings[n.dataset.ip]);
+        break;
       case 'go': if (stage.wantStart && !stage.playing) reveal(); break;
       case 'needLobby': /* someone cannot see our match in their list: open a fresh one (at most every 25 s) */
         if (isOwner() && !stage.playing && Date.now() - stage.recreatedAt > 25000) { stage.lobbyFor = ''; t('lobby asked for by ' + m.name); }
@@ -393,11 +400,15 @@
 
   /* to the network game list, from boot or from any network screen */
   async function toNetworkList() {
-    for (let i = 0; i < 400 && (screen() === SCR.title || screen() === SCR.intro); i++) {
-      const s = screen();
-      await key('enter'); /* also skips the intro movies */
-      await until(() => screen() !== s, 1200);
-    }
+    /* (the title screen ignores Enter while it animates in: frames run back to back here) */
+    try {
+      for (let i = 0; i < 400 && (screen() === SCR.title || screen() === SCR.intro); i++) {
+        const s = screen();
+        if (s === SCR.title) Module.setTurbo(true);
+        await key('enter', 60, 60);
+        await until(() => screen() !== s, 400);
+      }
+    } finally { Module.setTurbo(false); }
     for (let i = 0; i < 10; i++) {
       const s = screen();
       if (s === SCR.netlist) return;
@@ -433,8 +444,12 @@
     const mode = modeOf(s.mode);
     stage.isReady = false;
     await toNetworkList();
-    await key('enter'); /* Create Network Game */
-    if (!await until(() => screen() === SCR.settings, 8000)) throw new Error('the match setup screen did not open');
+    /* Create Network Game (the list ignores Enter for a moment after it opens: press again) */
+    for (let i = 0; i < 6 && screen() !== SCR.settings; i++) {
+      await key('enter');
+      await until(() => screen() === SCR.settings, 1800);
+    }
+    if (screen() !== SCR.settings) throw new Error('the match setup screen did not open');
     await sleep(500);
     await adjust(() => m8(ST + 4), s.maxPlayers, false);
     await key('down');
@@ -507,11 +522,15 @@
       const want = ch + 1, slot = mySlot(), cur = () => m8(A_CHAR + 4 * slot);
       /* one step at a time: held or quick presses skip characters */
       /* (a joiner's own choice only shows up after a round trip through the owner's game) */
-      for (let i = 0; i < 20 && cur() !== want; i++) {
-        const before = cur();
-        await key('right', 80, 150);
-        await until(() => cur() !== before, 3000);
-        await sleep(250);
+      /* the roster wraps around (16 entries): go the shorter way, then the other if that fails */
+      const right = (want - cur() + 16) % 16, dir = right <= 8 ? 'right' : 'left';
+      for (const d of [dir, dir === 'right' ? 'left' : 'right']) {
+        for (let i = 0; i < 18 && cur() !== want; i++) {
+          const before = cur();
+          await key(d, 80, 120);
+          await until(() => cur() !== before, 3000);
+          await sleep(150);
+        }
       }
       t('slot ' + slot + ' character ' + cur() + ' wanted ' + want);
       await key('enter');
@@ -733,6 +752,7 @@
         face(m.char),
         el('div', {style: 'flex:1'}, (m.owner ? '★ ' : '') + m.name + (m.ip === net.ipStr ? ' (you)' : ''),
           el('small', {}, (CHARACTERS[m.char] || '') + state(m))),
+        m.away ? null : paintPing(el('span', {'data-ip': m.ip, title: m.owner ? 'Connection to the online server' : 'Round trip to the room owner'}), net.pings[m.ip]),
         owner && m.ip !== net.ipStr ? el('button', {class: 'tiny', title: 'Remove from room', onclick: () => send({t: 'kick', ip: m.ip})}, '✕') : null)));
       form.render();
       chars.render();
@@ -830,32 +850,45 @@
   }
 
   // ---------------------------------------------------------------- in-game: ping and room panel
-  // Round trip to the online server, measured every 2 seconds while playing in a room.
+  // Round trip to the room owner's game (the owner measures the online server), every 2 seconds
+  // while in a room. Each player reports theirs, so everybody sees who has a bad connection.
+  const pingClass = ms => typeof ms !== 'number' || ms < 0 || ms > 150 ? 'bad' : ms > 80 ? 'mid' : 'good';
+  function paintPing(node, p) {
+    node.className = 'mping ' + (p == null ? '' : pingClass(p));
+    node.textContent = p >= 0 ? p + ' ms' : p === -1 ? 'no signal' : '…';
+    return node;
+  }
   const ping = (() => {
-    let node = null, sentAt = new Map(), seqNo = 0, last = 0;
-    function show(ms) {
+    let node = null, sentAt = new Map(), seqNo = 0, last = 0, ms = null;
+    function show() {
       if (!node) { node = el('div', {id: 'ping'}); document.body.append(node); }
-      node.textContent = typeof ms === 'number' ? 'Ping ' + ms + ' ms' : 'Ping —';
-      node.className = typeof ms !== 'number' || ms > 150 ? 'bad' : ms > 80 ? 'mid' : '';
+      const lost = last && Date.now() - last > 6000;
+      const label = isOwner() ? 'Server' : 'Host';
+      const others = net.members.filter(m => m.ip !== net.ipStr && !m.away);
+      const slow = others.filter(m => { const p = net.pings[m.ip]; return p === -1 || p > 150; });
+      node.textContent = lost ? label + ' — connection lost?' : (typeof ms === 'number' ? label + ' ' + ms + ' ms' : label + ' …') +
+        (slow.length ? ' · ⚠ ' + slow.map(m => m.name).join(', ') + ' lagging' : '');
+      node.className = lost ? 'bad' : slow.length && pingClass(ms) === 'good' ? 'mid' : pingClass(ms) === 'good' ? '' : pingClass(ms);
+      node.title = others.map(m => m.name + ': ' + (net.pings[m.ip] >= 0 ? net.pings[m.ip] + ' ms' : '?')).join('\n');
     }
     setInterval(() => {
       const on = window.gameStarted && !window.gameHidden && net.room && net.connected;
       if (node) node.style.display = on && !cover.visible ? 'block' : 'none';
-      if (!on) return;
-      if (last && Date.now() - last > 6000) show('—');
+      if (on) show();
+      if (!net.room || !net.connected) { last = 0; ms = null; return; }
       const id = ++seqNo;
       sentAt.set(id, performance.now());
       if (sentAt.size > 10) sentAt.delete(sentAt.keys().next().value);
-      send({t: 'ping', id});
+      send({t: 'hping', id, ms: ms == null || (last && Date.now() - last > 6000) ? -1 : ms});
     }, 2000);
     return {
+      get ms() { return ms; },
       pong(id) {
         const t0 = sentAt.get(id);
         if (t0 == null) return;
         sentAt.delete(id);
         last = Date.now();
-        show(Math.round(performance.now() - t0));
-        if (node) node.style.display = cover.visible ? 'none' : 'block';
+        ms = Math.round(performance.now() - t0);
       },
     };
   })();

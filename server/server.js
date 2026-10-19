@@ -178,6 +178,17 @@ server.on('upgrade', (req, socket) => {
 
 // ------------------------------------------------------------------ rooms
 const rooms = new Map();          // code -> room
+
+// Every 3 s, tell each room how good everybody's connection to the owner is (ms, or -1 when stale).
+setInterval(() => {
+  const now = Date.now();
+  for (const r of rooms.values()) {
+    const pings = {};
+    for (const m of r.members.values()) pings[ipKey(m.ip)] = m.away || !m.pingAt || now - m.pingAt > 7000 ? -1 : m.ping;
+    const msg = JSON.stringify({t: 'pings', pings});
+    for (const m of r.members.values()) sendTo(m, msg);
+  }
+}, 3000).unref?.();
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function newCode() {
@@ -303,6 +314,17 @@ function onClient(ws) {
       }
       case 'leave': leave(c); break;
       case 'ping': ws.send(JSON.stringify({t: 'pong', id: m.id})); break;
+      case 'hping': /* round trip to the room owner's page (the owner itself gets the server's) */
+        if (Number.isFinite(m.ms) && m.ms >= 0) { c.ping = Math.min(9999, Math.round(m.ms)); c.pingAt = Date.now(); }
+        if (!c.room || !c.room.owner || c.room.owner === c || c.room.owner.away) ws.send(JSON.stringify({t: 'hpong', id: m.id}));
+        else sendTo(c.room.owner, JSON.stringify({t: 'hping', id: m.id, from: ipKey(c.ip)}));
+        break;
+      case 'hpong': /* the owner's answer, back to whoever asked */
+        if (c.room && c.room.owner === c) {
+          const to = c.room.members.get(String(m.to || ''));
+          if (to) sendTo(to, JSON.stringify({t: 'hpong', id: m.id}));
+        }
+        break;
       case 'char': /* character picked in the web lobby (index in the game's roster); one per player */
         if (Number.isInteger(m.char) && m.char >= 0 && m.char < 16) {
           if (c.room && [...c.room.members.values()].some(o => o !== c && o.char === m.char))

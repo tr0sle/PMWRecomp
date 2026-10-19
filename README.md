@@ -25,8 +25,15 @@ executable and no decompilation. To play, each person uses **their own copy** of
      (with pictures), bots and options; each player picks their character.
    - While the players are in the room, each game loads and sets the match up out of sight
      (the game's own network menus are driven behind the room page), so **Start match** goes
-     straight into the race. In game, the ping shows in the top-left corner.
+     straight into the race (each game is ready about 15–25 s after joining the room).
+   - Connection indicator: in game, the top-left corner shows the round trip to the room
+     owner's game (the owner sees the server's) and warns when a player is lagging; the room's
+     player list shows everybody's ping.
 4. Every track, cup and character is unlocked (the game's own `UnlockAll` setting).
+5. Picture: widescreen 16:9 by default (the game's own console widescreen mode: wider field of
+   view, the HUD stretched as on a 16:9 TV); the **16:9 / 4:3** button switches it. The game is
+   drawn above the screen's resolution (at least 1.5x, plus MSAA) and every texture gets
+   mipmaps with trilinear + anisotropic filtering.
 
 On phones and tablets, on-screen controls appear (stick + buttons; turn the phone sideways).
 The game files need about 470 MB of browser storage.
