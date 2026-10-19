@@ -16,7 +16,7 @@ if [ "${1:-}" = "--setup" ]; then
 fi
 
 echo "uploading build ($(du -sh dist --exclude=_test | cut -f1)) ..."
-tar czf - --exclude=dist/_test dist server | $SSH "rm -rf /opt/pmwr/new && mkdir -p /opt/pmwr/new && tar xzf - -C /opt/pmwr/new \
+tar czf - --exclude=dist/_test --exclude='*.tmp*' dist server | $SSH "rm -rf /opt/pmwr/new && mkdir -p /opt/pmwr/new && tar xzf - -C /opt/pmwr/new \
   && rm -rf /opt/pmwr/dist /opt/pmwr/server && mv /opt/pmwr/new/dist /opt/pmwr/new/server /opt/pmwr/ && rm -rf /opt/pmwr/new \
   && chown -R pmwr:pmwr /opt/pmwr && systemctl restart pmwr && (systemctl try-restart pmwr-private || true) && sleep 1 && systemctl is-active pmwr"
 for site in ${DOMAIN//,/ }; do
